@@ -267,3 +267,8 @@ assert.equal(afterDelete.items.find(o => o.id === "b").index, 2);
 assert.deepEqual(validate({ version: 2, items: [make("rect", "old42"), make("circle", "old99"), make("rod", "old7")] }).items.map(o => o.index), [1, 2, 1]);
 assert.deepEqual(numberScene({ version: 2, items: [make("rect", "missing"), { ...make("rect", "explicit"), index: 1 }] }).items.map(o => o.index), [2, 1]);
 console.log("PASS category indices, stable references, rename validation, snapshots and legacy import");
+
+execFileSync(process.env.CXX || "g++", [
+  "-std=c++17", "-O2", "../engine/tests/conservation.cpp", "-o", "../engine/build/conservation.exe",
+], { windowsHide: true });
+execFileSync("../engine/build/conservation.exe", [], { stdio: "inherit", windowsHide: true });
