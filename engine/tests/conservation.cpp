@@ -10,6 +10,26 @@ static Body disk(double x, double vx, double mass = 1) {
 }
 
 int main() {
+  // Contacts match the visible segment, including its reverse side.
+  for (double angle : {0., .4, 1.2, 2.7}) for (double side : {-1., 1.}) {
+    Body floor{9, {0, 0}, {}, 4, .6, angle, 0, 0, 0, 0, true};
+    V normal=floor.axis(1)*side, center=contactCenter(floor);
+    Body ball=disk(0, 0);
+    ball.p=center+normal*.049;
+    ball.v=normal*(-1);
+    contact(ball,floor);
+    assert(std::abs(dot(ball.v,normal))<1e-10);
+    assert(norm(ball.normalImpulse-normal)<1e-10);
+    ball.p=center+floor.axis(1)*.5;
+    ball.v=floor.axis(1)*(-1);
+    contact(ball,floor);
+    assert(norm(ball.v+floor.axis(1))<1e-10);
+    ball.p=center+floor.axis(0)*2.2;
+    ball.v=floor.axis(0)*(-1);
+    contact(ball,floor);
+    assert(norm(ball.v+floor.axis(0))<1e-10);
+  }
+  std::cout << "PASS finite surface: rotated contacts, both sides, no phantom thickness\n";
   // Both bodies are free: internal collision impulses must cancel.
   for (double restitution : {0., .5, 1.}) {
     std::vector<Body> bs{disk(-.3, 1), disk(.3, -1, 2)};

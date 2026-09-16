@@ -60,11 +60,14 @@ void impulse(Body &a, V j, V r, int category=0) {
   a.torqueImpulse+=cross(r,j);
 }
 V velocity(const Body &a, V r) { return a.v + perp(r) * a.omega; }
+// A surface collides as the finite visible segment, including its reverse side.
+V contactCenter(const Body& a) { return a.kind==9 ? a.p-a.axis(1)*(a.h/2) : a.p; }
+double contactHeight(const Body& a) { return a.kind==9 ? 0 : a.h; }
 double extent(const Body &a, V axis) {
   if (a.kind == 1 || a.kind == 5)
     return a.w / 2;
   return std::abs(dot(a.axis(0), axis)) * a.w / 2 +
-         std::abs(dot(a.axis(1), axis)) * a.h / 2;
+         std::abs(dot(a.axis(1), axis)) * contactHeight(a) / 2;
 }
 std::pair<double, double> feature(const Body &a, V n, V t) {
   if (a.kind == 1 || a.kind == 5) {
@@ -73,22 +76,22 @@ std::pair<double, double> feature(const Body &a, V n, V t) {
   }
   V q={dot(n,a.axis(0)),dot(n,a.axis(1))};double lo=1e30,hi=-1e30;
   for(int sign:{-1,1}){
-    V v=std::abs(q.x)>std::abs(q.y)?V{std::copysign(a.w/2,q.x),sign*a.h/2}:V{sign*a.w/2,std::copysign(a.h/2,q.y)};
-    double value=dot(a.p+a.axis(0)*v.x+a.axis(1)*v.y,t);lo=std::min(lo,value);hi=std::max(hi,value);
+    V v=std::abs(q.x)>std::abs(q.y)?V{std::copysign(a.w/2,q.x),sign*contactHeight(a)/2}:V{sign*a.w/2,std::copysign(contactHeight(a)/2,q.y)};
+    double value=dot(contactCenter(a)+a.axis(0)*v.x+a.axis(1)*v.y,t);lo=std::min(lo,value);hi=std::max(hi,value);
   }
   return {lo, hi};
 }
 double faceHeight(const Body& a,V n,V t,double tangent){
   if(a.kind==1||a.kind==5)return dot(a.p,n)+a.w/2;
   V q={dot(n,a.axis(0)),dot(n,a.axis(1))},axis=std::abs(q.x)>std::abs(q.y)?a.axis(0)*std::copysign(1.,q.x):a.axis(1)*std::copysign(1.,q.y);
-  double e=std::abs(q.x)>std::abs(q.y)?a.w/2:a.h/2;
-  return (e+dot(a.p,axis)-tangent*dot(t,axis))/dot(n,axis);
+  double e=std::abs(q.x)>std::abs(q.y)?a.w/2:contactHeight(a)/2;
+  return (e+dot(contactCenter(a),axis)-tangent*dot(t,axis))/dot(n,axis);
 }
 // SAT narrow phase; the solver supplies broad-phase candidate pairs.
 void contact(Body &a, Body &b) {
   if (a.inv() == 0 && b.inv() == 0)
     return;
-  V d = b.p - a.p, n;
+  V d = contactCenter(b) - contactCenter(a), n;
   double depth = 1e30;
   std::array<V,5> axes = {a.axis(0), a.axis(1),b.axis(0),b.axis(1)};
   int axisCount = 4;
@@ -99,10 +102,10 @@ void contact(Body &a, Body &b) {
   else if (ac || bc) {
     Body &box = ac ? b : a;
     Body &circle = ac ? a : b;
-    V local = rot(circle.p - box.p, -box.angle);
+    V local = rot(circle.p - contactCenter(box), -box.angle);
     V closest = {std::clamp(local.x, -box.w / 2, box.w / 2),
-                 std::clamp(local.y, -box.h / 2, box.h / 2)};
-    V corner = circle.p - (box.p + rot(closest, box.angle));
+                 std::clamp(local.y, -contactHeight(box) / 2, contactHeight(box) / 2)};
+    V corner = circle.p - (contactCenter(box) + rot(closest, box.angle));
     if (norm(corner) > 1e-9)
       axes[axisCount++] = unit(corner);
   }
@@ -264,7 +267,7 @@ void step(std::vector<Body> &bs, const std::vector<Link> &links,
       if (l.kind != 3)
         constrain(bs, l);
     if(iter%4==0){
-      for(size_t i=0;i<bs.size();++i){const auto& b=bs[i];double ex=extent(b,{1,0})+.0001,ey=extent(b,{0,1})+.0001;bounds[i]={i,b.p.x-ex,b.p.x+ex,b.p.y-ey,b.p.y+ey};}
+      for(size_t i=0;i<bs.size();++i){const auto& b=bs[i];double ex=extent(b,{1,0})+.0001,ey=extent(b,{0,1})+.0001;V center=contactCenter(b);bounds[i]={i,center.x-ex,center.x+ex,center.y-ey,center.y+ey};}
       std::sort(bounds.begin(),bounds.end(),[](const Bounds& a,const Bounds& b){return a.x0==b.x0?a.i<b.i:a.x0<b.x0;});
       pairs.clear();
       for(size_t i=0;i<bounds.size();++i)for(size_t j=i+1;j<bounds.size()&&bounds[j].x0<=bounds[i].x1;++j){auto a=bounds[i],b=bounds[j];if(a.y1<b.y0||b.y1<a.y0||joined[a.i*bs.size()+b.i]||(bs[a.i].inv()==0&&bs[b.i].inv()==0))continue;pairs.emplace_back(std::min(a.i,b.i),std::max(a.i,b.i));}
