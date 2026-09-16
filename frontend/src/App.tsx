@@ -29,7 +29,9 @@ import {
   attachScene,
   editGeometry,
   removeItem,
-  rename,
+  reindex,
+  numberScene,
+  indexLabel,
   validate,
 } from "./model";
 import type {
@@ -260,6 +262,7 @@ export default function App() {
     setCounts([past.current.length, 0]);
   };
   const commit = (s: Scene) => {
+    s = numberScene(s);
     if (!running) remember(current.current);
     update(s);
   };
@@ -739,7 +742,7 @@ export default function App() {
     unit: string,
   ) => (
     <VectorFields
-      label={`${label}_${o.id}`}
+      label={`${label}_${indexLabel(o)}`}
       value={{ x: o.derived?.[index] || 0, y: o.derived?.[index + 1] || 0 }}
       unit={unit}
       disabled
@@ -857,7 +860,7 @@ export default function App() {
                       ? "Свободное падение"
                       : names[o.kind]}
                   </span>
-                  <i>{o.id}</i>
+                  <i>{indexLabel(o)}</i>
                 </button>
               ))}
             </div>
@@ -975,7 +978,7 @@ export default function App() {
                         }
                         onChange={() => choose(b.id)}
                       />
-                      {names[b.kind]} {b.id}
+                      {names[b.kind]} {indexLabel(b)}
                     </label>
                   ))}
                 </div>
@@ -987,23 +990,22 @@ export default function App() {
                     <input
                       className="index-input"
                       aria-label="Индекс"
-                      key={chosen.id}
-                      defaultValue={chosen.id}
+                      key={chosen.id + ":" + chosen.index}
+                      defaultValue={indexLabel(chosen)}
                       disabled={running}
                       onBlur={(e) => {
                         try {
-                          if (e.target.value !== chosen.id) {
+                          if (e.target.value !== indexLabel(chosen)) {
                             commit(
-                              rename(
+                              reindex(
                                 current.current,
                                 chosen.id,
                                 e.target.value,
                               ),
                             );
-                            setSelected(e.target.value);
                           }
                         } catch (err) {
-                          e.target.value = chosen.id;
+                          e.target.value = indexLabel(chosen);
                           tell(String(err), true);
                         }
                       }}
@@ -1038,7 +1040,7 @@ export default function App() {
                           : chosen.targets
                               .map(
                                 (id) =>
-                                  `${names[scene.items.find((o) => o.id === id)!.kind]} ${id}`,
+                                  `${names[scene.items.find((o) => o.id === id)!.kind]} ${indexLabel(scene.items.find((o) => o.id === id)!)}`,
                               )
                               .join(", ")}
                       </div>
@@ -1226,7 +1228,7 @@ export default function App() {
                                       .filter((b) => b.kind === "pulley")
                                       .map((b) => (
                                         <option key={b.id} value={b.id}>
-                                          Блок {b.id}
+                                          Блок {indexLabel(b)}
                                         </option>
                                       ))}
                                   </select>
@@ -1250,7 +1252,7 @@ export default function App() {
                                           .kind
                                       ]
                                     }{" "}
-                                    {a.id}
+                                    {indexLabel(scene.items.find((o) => o.id === a.id)!)}
                                   </span>
                                   <Tool
                                     label={`Отсоединить конец ${i + 1}`}
@@ -1279,10 +1281,10 @@ export default function App() {
                                         .kind
                                     ]
                                   }{" "}
-                                  {a.id}
+                                  {indexLabel(scene.items.find((o) => o.id === a.id)!)}
                                 </span>
                                 <Tool
-                                  label={`Отсоединить тело ${a.id}`}
+                                  label={`Отсоединить тело ${indexLabel(scene.items.find((o) => o.id === a.id)!)}`}
                                   disabled={running}
                                   onClick={() =>
                                     change(chosen.id, {
@@ -1313,11 +1315,11 @@ export default function App() {
                     {o.kind === "acceleration" && o.gravity
                       ? "Свободное падение"
                       : names[o.kind]}{" "}
-                    <i>{o.id}</i>
+                    <i>{indexLabel(o)}</i>
                   </summary>
                   {effect(o) ? (
                     <VectorFields
-                      label={`${o.gravity ? "g" : o.kind === "force" ? "F" : o.kind === "velocity" ? "v" : "a"}_${o.id}`}
+                      label={`${o.gravity ? "g" : o.kind === "force" ? "F" : o.kind === "velocity" ? "v" : "a"}_${indexLabel(o)}`}
                       value={o.vector}
                       unit={
                         o.kind === "force"
@@ -1331,14 +1333,14 @@ export default function App() {
                   ) : body(o) ? (
                     <>
                       <Num
-                        label={`m_${o.id}`}
+                        label={`m_${indexLabel(o)}`}
                         value={o.mass}
                         unit="кг"
                         min={o.fixed || o.trajectory ? 0 : 0.001}
                         onChange={(mass) => change(o.id, { mass })}
                       />
                       <VectorFields
-                        label={`v_${o.id}`}
+                        label={`v_${indexLabel(o)}`}
                         value={{ x: o.vx, y: o.vy }}
                         unit="м/с"
                         onChange={(v) => change(o.id, { vx: v.x, vy: v.y })}
@@ -1349,7 +1351,7 @@ export default function App() {
                         ))
                       ) : (
                         <VectorFields
-                          label={`Fтяж_${o.id}`}
+                          label={`Fтяж_${indexLabel(o)}`}
                           value={scene.items
                             .filter(effect)
                             .filter((e) => e.gravity && targets(e, [o]).length)
@@ -1369,7 +1371,7 @@ export default function App() {
                   ) : o.kind !== "bearing" ? (
                     <>
                       <Num
-                        label={`l_${o.id}`}
+                        label={`l_${indexLabel(o)}`}
                         value={o.length}
                         unit="м"
                         min={0.001}
@@ -1377,7 +1379,7 @@ export default function App() {
                       />
                       {o.kind === "spring" && (
                         <Num
-                          label={`k_${o.id}`}
+                          label={`k_${indexLabel(o)}`}
                           value={o.stiffness}
                           unit="Н/м"
                           min={0}

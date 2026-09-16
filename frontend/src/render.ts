@@ -1,5 +1,6 @@
 import {
   body,
+  indexLabel,
   effect,
   geo,
   targets,
@@ -269,7 +270,7 @@ export function paint(
           c.restore();
         }
       }
-      label(o.kind === "surface" ? "s" : o.kind === "rod" ? "l" : "m", o.id, {
+      label(o.kind === "surface" ? "s" : o.kind === "rod" ? "l" : "m", indexLabel(o), {
         x: o.w / 2 + 10 / z,
         y: 3 / z,
       });
@@ -323,7 +324,7 @@ export function paint(
       }
       dot(a, 2.5 / z);
       dot(b, 2.5 / z);
-      label(o.kind === "spring" ? "k" : "l", o.id, {
+      label(o.kind === "spring" ? "k" : "l", indexLabel(o), {
         x: (a.x + b.x) / 2 + 10 / z,
         y: (a.y + b.y) / 2 - 9 / z,
       });
@@ -375,11 +376,11 @@ export function paint(
             b,
             o.vector,
             o.kind === "force" ? "F" : o.kind === "velocity" ? "v" : "a",
-            o.id,
+            indexLabel(o),
           );
   for (const b of scene.items.filter(body)) {
     if (!visible(b)) continue;
-    arrow(b, { x: b.vx, y: b.vy }, "v", b.id, 28);
+    arrow(b, { x: b.vx, y: b.vy }, "v", indexLabel(b), 28);
     if (b.derived) {
       const d = b.derived;
       for (const [i, name, offset] of [
@@ -390,8 +391,8 @@ export function paint(
         [10, "R", 18],
         [12, "T", 22],
       ] as const)
-        arrow(b, { x: d[i], y: d[i + 1] }, name, b.id, offset);
-      arrow(b, { x: d[0], y: d[1] }, "a", b.id, 34);
+        arrow(b, { x: d[i], y: d[i + 1] }, name, indexLabel(b), offset);
+      arrow(b, { x: d[0], y: d[1] }, "a", indexLabel(b), 34);
     } else {
       let x = 0,
         y = 0;
@@ -400,7 +401,7 @@ export function paint(
           x += e.vector.x * b.mass;
           y += e.vector.y * b.mass;
         }
-      arrow(b, { x, y }, "Fтяж", b.id);
+      arrow(b, { x, y }, "Fтяж", indexLabel(b));
     }
   }
 }

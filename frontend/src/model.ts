@@ -18,6 +18,7 @@ export type Vec = { x: number; y: number };
 export type Attachment = { id: string; point?: 0 | 1; local: Vec };
 export type Geometry = {
   id: string;
+  index?: number;
   kind: Exclude<Kind, EffectKind>;
   x: number;
   y: number;
@@ -48,6 +49,7 @@ export type Connector = Geometry & {
 };
 export type Effect = {
   id: string;
+  index?: number;
   kind: EffectKind;
   vector: Vec;
   scope: "selection" | "all";
@@ -89,6 +91,32 @@ export const nextId = (items: Item[]) => {
   while (items.some((o) => o.id === String(n))) n++;
   return String(n);
 };
+export const indexGroup = (o: Item) => o.kind === "circle" ? "rect" : o.kind;
+export const indexLabel = (o: Item) => String(o.index ?? o.id);
+// IDs remain stable references; indices are labels unique only within a category.
+export function numberScene(s: Scene): Scene {
+  const used = new Map<Kind, Set<number>>();
+  for (const o of s.items) {
+    const group = indexGroup(o);
+    if (!used.has(group)) used.set(group, new Set());
+    if (o.index === undefined) continue;
+    if (!Number.isSafeInteger(o.index) || o.index < 1 || used.get(group)!.has(o.index))
+      throw Error("Индекс должен быть положительным целым и уникальным в своей категории");
+    used.get(group)!.add(o.index);
+  }
+  return { ...s, items: s.items.map((o) => {
+    if (o.index !== undefined) return o;
+    const group = used.get(indexGroup(o))!;
+    let index = 1;
+    while (group.has(index)) index++;
+    group.add(index);
+    return { ...o, index };
+  }) };
+}
+export function reindex(s: Scene, id: string, value: string): Scene {
+  if (!/^[1-9][0-9]*$/.test(value)) throw Error("Индекс — целое число от 1");
+  return numberScene({ ...s, items: s.items.map(o => o.id === id ? { ...o, index: Number(value) } : o) });
+}
 export function make(kind: Kind, id: string, x = 0, y = 0): Item {
   if (["force", "velocity", "acceleration"].includes(kind))
     return {
@@ -145,7 +173,7 @@ export function make(kind: Kind, id: string, x = 0, y = 0): Item {
     bindings: [],
   };
 }
-export const initial: Scene = {
+export const initial: Scene = numberScene({
   version: 2,
   items: [
     make("surface", "1", 0, 1.6),
@@ -159,7 +187,7 @@ export const initial: Scene = {
       gravity: true,
     },
   ],
-};
+});
 export const rotate = (p: Vec, a: number): Vec => ({
   x: p.x * Math.cos(a) - p.y * Math.sin(a),
   y: p.x * Math.sin(a) + p.y * Math.cos(a),
@@ -603,6 +631,6 @@ export function validate(value: unknown): Scene {
       throw Error("Отсутствует блок");
   }
   return JSON.parse(
-    JSON.stringify(s, (key, v) => (key === "derived" ? undefined : v)),
+    JSON.stringify(numberScene(s), (key, v) => (key === "derived" ? undefined : v)),
   );
 }

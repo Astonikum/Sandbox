@@ -243,3 +243,27 @@ const rotation = rotated(turning, { x: 1, y: 0 }, { x: Math.cos(.31), y: Math.si
 assert.ok(Math.abs(rotation.angle - Math.PI / 9) <= Math.PI / 36);
 assert.ok(Math.abs(rotation.angle / (Math.PI / 36) - Math.round(rotation.angle / (Math.PI / 36))) < 1e-10);
 console.log("PASS anchored corner/side resizing, two endpoints and 5-degree rotation");
+
+const { numberScene, reindex } = await import(modelUrl);
+const indexed = numberScene({ version: 2, items: [
+  make("surface", "s"), make("rect", "a"), make("rod", "r"),
+  make("circle", "b"), make("bearing", "h"), make("spring", "k"),
+  make("spring", "k2"),
+] });
+assert.deepEqual(indexed.items.map(o => o.index), [1, 1, 1, 2, 1, 1, 2]);
+indexed.items[2].ends[0] = { id: "a", local: { x: 0, y: 0 } };
+const relabeled = reindex(indexed, "a", "3");
+assert.equal(relabeled.items[1].id, "a");
+assert.equal(relabeled.items[1].index, 3);
+assert.equal(relabeled.items[2].ends[0].id, "a");
+assert.equal(indexed.items[1].index, 1, "undo snapshot must not be mutated");
+assert.deepEqual(validate(JSON.parse(JSON.stringify(relabeled))), relabeled);
+assert.throws(() => reindex(indexed, "a", "2"), /категории/);
+for (const bad of ["0", "-1", "1.5", "a", "9007199254740992"])
+  assert.throws(() => reindex(indexed, "a", bad));
+const afterDelete = numberScene({ ...indexed, items: [...removeItem(indexed, "a").items, make("rect", "new")] });
+assert.equal(afterDelete.items.at(-1).index, 1);
+assert.equal(afterDelete.items.find(o => o.id === "b").index, 2);
+assert.deepEqual(validate({ version: 2, items: [make("rect", "old42"), make("circle", "old99"), make("rod", "old7")] }).items.map(o => o.index), [1, 2, 1]);
+assert.deepEqual(numberScene({ version: 2, items: [make("rect", "missing"), { ...make("rect", "explicit"), index: 1 }] }).items.map(o => o.index), [2, 1]);
+console.log("PASS category indices, stable references, rename validation, snapshots and legacy import");
