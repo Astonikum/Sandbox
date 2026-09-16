@@ -45,7 +45,7 @@ import type {
 } from "./model";
 import { Simulation } from "./simulation";
 import type { Metrics } from "./simulation";
-import { paint, fit, fromScreen, hit, handles, resized } from "./render";
+import { paint, fit, fromScreen, hit, handles, resized, rotationHandle, rotated } from "./render";
 import type { Camera } from "./render";
 import { ComponentIcon } from "./ComponentIcon";
 import "./App.css";
@@ -158,25 +158,37 @@ function VectorFields({
   onChange: (v: Vec) => void;
   disabled?: boolean;
 }) {
+  const magnitude = Math.hypot(value.x, value.y);
+  const [zeroAngle, setZeroAngle] = useState(0);
+  const angle = magnitude > 0 ? Math.atan2(value.y, value.x) * 180 / Math.PI : zeroAngle;
+  const setPolar = (length: number, degrees: number) => {
+    setZeroAngle(degrees);
+    const radians = degrees * Math.PI / 180;
+    onChange({ x: length * Math.cos(radians), y: length * Math.sin(radians) });
+  };
   return (
-    <div className="pair">
-      <Num
-        label={`${label}ₓ`}
-        value={value.x}
-        unit={unit}
-        disabled={disabled}
-        onChange={(x) => onChange({ ...value, x })}
-      />
-      <Num
-        label={`${label}ᵧ`}
-        value={value.y}
-        unit={unit}
-        disabled={disabled}
-        onChange={(y) => onChange({ ...value, y })}
-      />
+    <div className="vector-fields">
+      <Num label={`|${label}|`} value={magnitude} min={0} unit={unit}
+        disabled={disabled} onChange={(n) => setPolar(n, angle)} />
+      <div className="pair">
+        <Num label={`${label}: угол к X`} value={angle} unit="°"
+          disabled={disabled} onChange={(n) => setPolar(magnitude, n)} />
+        <Num label={`${label}: угол к Y`} value={angle - 90} unit="°"
+          disabled={disabled} onChange={(n) => setPolar(magnitude, n + 90)} />
+      </div>
+      <small>Углы по часовой стрелке · Y направлена вниз</small>
+      <details>
+        <summary>Проекции X/Y</summary>
+        <div className="pair">
+          <Num label={`${label}ₓ`} value={value.x} unit={unit} disabled onChange={() => {}} />
+          <Num label={`${label}ᵧ`} value={value.y} unit={unit} disabled onChange={() => {}} />
+        </div>
+        <small>X = |{label}| cos α; Y = |{label}| sin α</small>
+      </details>
     </div>
   );
 }
+
 const observed = [
   ["Ускорение a", 0, "м/с²"],
   ["Сила тяжести Fтяж", 2, "Н"],
@@ -222,7 +234,7 @@ export default function App() {
     space = useRef(false),
     drag = useRef<{ id: string; x: number; y: number } | null>(null);
   const gesture = useRef<{
-    type: "pan" | "move" | "resize";
+    type: "pan" | "move" | "resize" | "rotate";
     id?: string;
     start: Vec;
     screen: Vec;
@@ -511,9 +523,11 @@ export default function App() {
       const i = handles(chosen, current.current.items).findIndex(
         (q) => Math.hypot(q.x - p.x, q.y - p.y) < 8 / camera.current.scale,
       );
-      if (i >= 0) {
+      const turn = rotationHandle(chosen, camera.current.scale);
+      const rotating = turn && Math.hypot(turn.x - p.x, turn.y - p.y) < 12 / camera.current.scale;
+      if (i >= 0 || rotating) {
         gesture.current = {
-          type: "resize",
+          type: rotating ? "rotate" : "resize",
           id: chosen.id,
           start: p,
           screen,
@@ -572,7 +586,9 @@ export default function App() {
     }
     const o = g.original!,
       patch =
-        g.type === "resize"
+        g.type === "rotate"
+          ? rotated(o, g.start, p)
+          : g.type === "resize"
           ? resized(
               o,
               g.handle!,
@@ -1059,7 +1075,7 @@ export default function App() {
                         {field("x", "x", "м", -1e5, 1e5, running)}
                         {field("y", "y", "м", -1e5, 1e5, running)}
                       </div>
-                      <div className="pair">
+                      {!["rod", "surface"].includes(chosen.kind) && <div className="pair">
                         {field(
                           "w",
                           chosen.kind === "circle" ||
@@ -1075,8 +1091,8 @@ export default function App() {
                         {!["circle", "pulley", "bearing"].includes(
                           chosen.kind,
                         ) && field("h", "Высота", "м", 0.001, 1e5, running)}
-                      </div>
-                      {field("angle", "Угол φ", "рад", -1e5, 1e5, running)}
+                      </div>}
+                      {!["rod", "surface"].includes(chosen.kind) && field("angle", "Угол φ", "рад", -1e5, 1e5, running)}
                       {body(chosen) ? (
                         <>
                           <div className="pair">

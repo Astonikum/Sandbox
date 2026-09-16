@@ -170,3 +170,76 @@ execFileSync("../engine/build/physics.exe", ["--test"], {
   stdio: "inherit",
   windowsHide: true,
 });
+
+const { drawOrder, hit, paint } = await import(url(
+  readFileSync(new URL("../src/render.ts", import.meta.url), "utf8")
+    .replace(/from ['"]\.\/model['"]/g, `from '${modelUrl}'`),
+));
+const layered = [make("bearing", "bearing"), make("rod", "rod"), make("rect", "rect")];
+assert.deepEqual(drawOrder(layered).map(o => o.id), ["rect", "rod", "bearing"]);
+assert.equal(hit(layered, { x: 0, y: 0 }, .01).id, "bearing");
+for (const kind of ["spring", "rope", "rod"]) {
+  const lever = make("rod", "lever");
+  const other = make(kind, "other", 0, 1);
+  other.angle = Math.PI / 2;
+  for (const id of ["lever", "other"]) {
+    const joined = attachScene({ version: 2, items: [lever, other] }, id);
+    assert.ok(joined.items.every(o => o.ends.every(a => !a)));
+  }
+  other.x = 1;
+  assert.ok(attachScene({ version: 2, items: [lever, other] }, "other").items[1].ends[0]);
+}
+console.log("PASS lever endpoints, stacking and picking");
+
+const labels = [];
+const context = new Proxy({}, {
+  get: (_, key) => key === "measureText" ? () => ({ width: 10 }) :
+    key === "fillText" ? s => labels.push(s) : () => {},
+  set: () => true,
+});
+globalThis.devicePixelRatio = 1;
+const canvas = { width: 0, height: 0, getBoundingClientRect: () => ({ width: 800, height: 600 }), getContext: () => context };
+const moving = make("rect", "moving");
+moving.vx = 1;
+for (const running of [false, true]) {
+  labels.length = 0;
+  if (running) {
+    moving.derived = Array(20).fill(0);
+    moving.derived[3] = 9.81;
+  }
+  paint(canvas, { version: 2, items: [moving] }, { x: 0, y: 0, scale: 80 }, null, false, running);
+  assert.ok(labels.includes("v"));
+  if (running) assert.ok(labels.includes("Fтяж"));
+}
+console.log("PASS unselected force and velocity rendering");
+
+const { resized, handles, rotated } = await import(url(
+  readFileSync(new URL("../src/render.ts", import.meta.url), "utf8")
+    .replace(/from ['"]\.\/model['"]/g, `from '${modelUrl}'`),
+));
+const { world } = await import(modelUrl);
+const nearPoint = (a, b) => assert.ok(Math.hypot(a.x-b.x, a.y-b.y) < 1e-10);
+for (const angle of [0, .7, Math.PI / 2]) {
+  const box = { ...make("rect", "box"), angle, w: 2, h: 2 };
+  const changed = { ...box, ...resized(box, 2, world(box, { x: 2, y: -3 }), [box]) };
+  nearPoint(world(box, { x: -1, y: 1 }), world(changed, { x: -changed.w/2, y: changed.h/2 }));
+  assert.equal(handles(box, [box]).length, 8);
+  const side = { ...box, ...resized(box, 5, world(box, { x: 3, y: 7 }), [box]) };
+  assert.equal(side.h, box.h);
+  nearPoint(world(box, { x: -1, y: 0 }), world(side, { x: -side.w/2, y: 0 }));
+  for (const kind of ["rod", "surface"]) {
+    const beam = { ...make(kind, "beam"), angle };
+    assert.equal(handles(beam, [beam]).length, 2);
+    const fixedEnd = endpoint(beam, 0);
+    const edited = { ...beam, ...resized(beam, 1, { x: 3, y: 4 }, [beam]) };
+    nearPoint(endpoint(edited, 0), fixedEnd);
+    nearPoint(endpoint(edited, 1), { x: 3, y: 4 });
+    if (kind === "rod") assert.equal(edited.h, .12);
+    assert.deepEqual(resized(beam, 1, fixedEnd, [beam]), {});
+  }
+}
+const turning = make("rect", "turning");
+const rotation = rotated(turning, { x: 1, y: 0 }, { x: Math.cos(.31), y: Math.sin(.31) });
+assert.ok(Math.abs(rotation.angle - Math.PI / 9) <= Math.PI / 36);
+assert.ok(Math.abs(rotation.angle / (Math.PI / 36) - Math.round(rotation.angle / (Math.PI / 36))) < 1e-10);
+console.log("PASS anchored corner/side resizing, two endpoints and 5-degree rotation");

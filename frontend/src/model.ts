@@ -61,7 +61,7 @@ export const names: Record<Kind, string> = {
   rect: "Тело",
   circle: "Тело (круг)",
   surface: "Поверхность",
-  rod: "Стержень",
+  rod: "Рычаг",
   bearing: "Подшипник",
   pulley: "Блок",
   spring: "Пружина",
@@ -181,7 +181,7 @@ export function endpoint(o: Geometry, end: 0 | 1): Vec {
     o,
     o.kind === "rod" && o.h > o.w
       ? { x: 0, y: ((end ? 1 : -1) * o.h) / 2 }
-      : { x: ((end ? 1 : -1) * o.w) / 2, y: 0 },
+      : { x: ((end ? 1 : -1) * o.w) / 2, y: o.kind === "surface" ? -o.h / 2 : 0 },
   );
 }
 export function resolve(
@@ -293,7 +293,7 @@ export function attachScene(s: Scene, id: string, tolerance = 0.15): Scene {
         }
         if (!best)
           for (const other of [...items].reverse().filter(body))
-            if (other.id !== id && inside(other, p, tolerance / 3)) {
+            if (other.id !== id && other.kind !== "rod" && inside(other, p, tolerance / 3)) {
               best = { id: other.id, local: local(other, p) };
               break;
             }
@@ -319,7 +319,12 @@ export function attachScene(s: Scene, id: string, tolerance = 0.15): Scene {
             o.kind === "bearing"
               ? Math.hypot(p.x - center(o, items).x, p.y - center(o, items).y) <
                 tolerance
-              : inside(o, p, tolerance / 3)
+              : o.kind === "rod"
+                ? ([0, 1] as const).some((e) => {
+                    const q = endpoint(o, e);
+                    return Math.hypot(p.x - q.x, p.y - q.y) < tolerance;
+                  })
+                : inside(o, p, tolerance / 3)
           ) {
             other.ends[end] = {
               id,

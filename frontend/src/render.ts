@@ -65,15 +65,23 @@ function segment(p: Vec, a: Vec, b: Vec) {
     );
   return Math.hypot(p.x - a.x - dx * t, p.y - a.y - dy * t);
 }
+// Keep picking consistent with the visible stacking order.
+export function drawOrder(items: Item[]) {
+  const layer = (o: Item) =>
+    o.kind === "bearing" || o.kind === "pulley" ? 3 :
+    o.kind === "rod" ? 2 :
+    o.kind === "spring" || o.kind === "rope" ? 1 : 0;
+  return [...items].sort((a, b) => layer(a) - layer(b));
+}
 export function hit(
   items: Item[],
   p: Vec,
   tolerance: number,
   onlyBodies = false,
 ) {
-  return [...items].reverse().find((o) => {
+  return drawOrder(items).reverse().find((o) => {
     if (effect(o) || (onlyBodies && !body(o))) return false;
-    if (o.kind === "spring" || o.kind === "rope")
+    if (o.kind === "spring" || o.kind === "rope" || o.kind === "surface")
       return segment(p, endAt(o, 0, items), endAt(o, 1, items)) < tolerance;
     if (o.kind === "bearing") {
       const q = center(o, items);
@@ -82,12 +90,22 @@ export function hit(
     return inside(o, p, tolerance / 3);
   });
 }
+const sides: Vec[] = [
+  { x: -1, y: -1 }, { x: -1, y: 1 }, { x: 1, y: -1 }, { x: 1, y: 1 },
+  { x: -1, y: 0 }, { x: 1, y: 0 }, { x: 0, y: -1 }, { x: 0, y: 1 },
+];
+export const twoEnds = (o: Geometry) => ["rod", "surface", "spring", "rope"].includes(o.kind);
 export function handles(o: Geometry, items: Item[]): Vec[] {
-  if (o.kind === "spring" || o.kind === "rope")
-    return [endAt(o, 0, items), endAt(o, 1, items)];
-  return [-1, 1].flatMap((x) =>
-    [-1, 1].map((y) => world(o, { x: (x * o.w) / 2, y: (y * o.h) / 2 })),
-  );
+  if (twoEnds(o)) return [endAt(o, 0, items), endAt(o, 1, items)];
+  return sides.map(({ x, y }) => world(o, { x: x * o.w / 2, y: y * o.h / 2 }));
+}
+export function rotationHandle(o: Geometry, scale: number): Vec | null {
+  return twoEnds(o) ? null : world(o, { x: o.w / 2 + 24 / scale, y: -o.h / 2 - 24 / scale });
+}
+export function rotated(o: Geometry, start: Vec, p: Vec) {
+  const angle = o.angle + Math.atan2(p.y - o.y, p.x - o.x) - Math.atan2(start.y - o.y, start.x - o.x);
+  const step = Math.PI / 36;
+  return { angle: Math.round(angle / step) * step };
 }
 export function pulleyPath(a: Vec, b: Vec, p: Geometry) {
   const r = p.w / 2,
@@ -211,7 +229,7 @@ export function paint(
     Math.abs(o.x - camera.x) <
       rect.width / (2 * z) + Math.hypot(o.w, o.h) + 2 &&
     Math.abs(o.y - camera.y) < rect.height / (2 * z) + Math.hypot(o.w, o.h) + 2;
-  for (const o of scene.items.filter(geo)) {
+  for (const o of drawOrder(scene.items).filter(geo)) {
     if (body(o)) {
       if (!visible(o)) continue;
       c.save();
@@ -237,14 +255,17 @@ export function paint(
             : o.kind === "rod"
               ? "#171717"
               : "#cececa";
-        c.fillRect(-o.w / 2, -o.h / 2, o.w, o.h);
-        c.strokeRect(-o.w / 2, -o.h / 2, o.w, o.h);
+        if (o.kind !== "surface") {
+          c.fillRect(-o.w / 2, -o.h / 2, o.w, o.h);
+          c.strokeRect(-o.w / 2, -o.h / 2, o.w, o.h);
+        }
         if (o.kind === "surface") {
+          line({ x: -o.w / 2, y: -o.h / 2 }, { x: o.w / 2, y: -o.h / 2 });
           c.save();
           c.lineWidth = 1 / z;
           const spacing = Math.max(0.08, 9 / z);
           for (let x = -o.w / 2; x < o.w / 2; x += spacing)
-            line({ x, y: o.h / 2 }, { x: x - 6 / z, y: o.h / 2 + 7 / z });
+            line({ x, y: -o.h / 2 }, { x: x - 6 / z, y: -o.h / 2 + 7 / z });
           c.restore();
         }
       }
@@ -332,12 +353,18 @@ export function paint(
         );
       }
       c.restore();
-      if (o.id === selected && !running && !chosenTargets.length)
+      if (o.id === selected && !running && !chosenTargets.length) {
+        const turn = rotationHandle(o, z);
+        if (turn) {
+          dot(turn, 9 / z);
+          text("↻", { x: turn.x - 6 / z, y: turn.y + 5 / z }, 17);
+        }
         for (const p of handles(o, scene.items)) {
           c.fillStyle = "white";
           c.fillRect(p.x - 3 / z, p.y - 3 / z, 6 / z, 6 / z);
           c.strokeRect(p.x - 3 / z, p.y - 3 / z, 6 / z, 6 / z);
         }
+      }
     }
   }
   for (const o of scene.items.filter(effect))
@@ -350,8 +377,9 @@ export function paint(
             o.kind === "force" ? "F" : o.kind === "velocity" ? "v" : "a",
             o.id,
           );
-  const b = scene.items.find((o) => o.id === selected);
-  if (b && body(b) && visible(b)) {
+  for (const b of scene.items.filter(body)) {
+    if (!visible(b)) continue;
+    arrow(b, { x: b.vx, y: b.vy }, "v", b.id, 28);
     if (b.derived) {
       const d = b.derived;
       for (const [i, name, offset] of [
@@ -363,7 +391,6 @@ export function paint(
         [12, "T", 22],
       ] as const)
         arrow(b, { x: d[i], y: d[i + 1] }, name, b.id, offset);
-      arrow(b, { x: b.vx, y: b.vy }, "v", b.id, 28);
       arrow(b, { x: d[0], y: d[1] }, "a", b.id, 34);
     } else {
       let x = 0,
@@ -383,19 +410,30 @@ export function resized(
   p: Vec,
   items: Item[],
 ): Partial<Geometry> {
-  if (o.kind === "spring" || o.kind === "rope") {
+  if (twoEnds(o)) {
     const a = handle === 0 ? p : endAt(o, 0, items),
-      b = handle === 1 ? p : endAt(o, 1, items);
+      b = handle === 1 ? p : endAt(o, 1, items),
+      length = Math.hypot(b.x - a.x, b.y - a.y);
+    if (length < (o.kind === "rod" ? 0.12 : 0.01)) return {};
+    const angle = Math.atan2(b.y - a.y, b.x - a.x),
+      h = o.kind === "rod" ? 0.12 : o.h,
+      offset = o.kind === "surface" ? h / 2 : 0;
     return {
-      x: (a.x + b.x) / 2,
-      y: (a.y + b.y) / 2,
-      w: Math.max(0.01, Math.hypot(a.x - b.x, a.y - b.y)),
-      angle: Math.atan2(b.y - a.y, b.x - a.x),
+      x: (a.x + b.x) / 2 - Math.sin(angle) * offset,
+      y: (a.y + b.y) / 2 + Math.cos(angle) * offset,
+      w: length, h, angle,
       ends: o.ends.map((a, i) => (i === handle ? null : a)) as Geometry["ends"],
     };
   }
-  const q = local(o, p),
-    w = Math.max(0.1, Math.abs(q.x) * 2),
-    h = Math.max(0.1, Math.abs(q.y) * 2);
-  return { w, h: ["circle", "pulley", "bearing"].includes(o.kind) ? w : h };
+  const side = sides[handle], q = local(o, p),
+    anchor = { x: -side.x * o.w / 2, y: -side.y * o.h / 2 },
+    round = ["circle", "pulley", "bearing"].includes(o.kind);
+  let w = side.x ? Math.max(0.01, side.x * (q.x - anchor.x)) : o.w,
+    h = side.y ? Math.max(0.01, side.y * (q.y - anchor.y)) : o.h;
+  if (round) w = h = side.x && side.y ? Math.max(w, h) : side.x ? w : h;
+  const center = world(o, {
+    x: side.x ? anchor.x + side.x * w / 2 : 0,
+    y: side.y ? anchor.y + side.y * h / 2 : 0,
+  });
+  return { ...center, w, h };
 }

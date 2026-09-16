@@ -333,3 +333,28 @@ for (const count of [20, 100, 200]) {
     `WASM ${count} separated bodies: median ${times[60].toFixed(3)} ms/tick, p95 ${times[114].toFixed(3)} ms/tick (240 Hz budget 4.167 ms)`,
   );
 }
+
+// One state must satisfy kinematics, impulse and energy together.
+reset([base], 9.81);
+ticks(240);
+const energeticFall = sample();
+assert.ok(Math.abs(energeticFall[4] - 9.81) < 1e-10, "gravity impulse = delta momentum");
+const fallEnergy = .5 * energeticFall[4] ** 2 - 9.81 * energeticFall[1];
+assert.ok(Math.abs(fallEnergy) < .03, "free-fall energy drift under 0.03 J after 1 s");
+reset([base], 0);
+assert.equal(engine._engine_force(0, 2, 0, 0, 0), 0);
+ticks(240);
+const worked = sample();
+assert.ok(Math.abs(worked[3] - 2) < 1e-10, "force impulse counted exactly once");
+assert.ok(Math.abs(.5 * worked[3] ** 2 - 2 * worked[0]) < .002, "work equals kinetic energy within integration error");
+const spinning = [...base];
+spinning[9] = 2;
+spinning[10] = -3;
+spinning[11] = 4;
+reset([spinning], 0);
+ticks(240);
+const inertial = sample();
+assert.ok(Math.abs(inertial[3] - 2) < 1e-12 && Math.abs(inertial[4] + 3) < 1e-12);
+assert.ok(Math.abs(inertial[5] - 4) < 1e-12, "free angular momentum conserved");
+assert.ok(Math.abs(inertial[0] - 2) < 1e-10 && Math.abs(inertial[1] + 3) < 1e-10);
+console.log("PASS joint kinematics/impulse/energy: free fall, constant-force work, free translation and rotation");
