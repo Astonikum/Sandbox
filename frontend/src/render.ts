@@ -179,8 +179,11 @@ export function paint(
   };
   const arrow = (origin: Vec, v: Vec, name: string, id: string, offset = 0) => {
     const mag = Math.hypot(v.x, v.y);
-    if (mag < 0.002) return;
-    const length = Math.min(1.7, Math.max(0.3, Math.log1p(mag) * 0.35)),
+    if (mag === 0) return;
+    // Let small vectors approach zero continuously: a minimum shaft length
+    // makes a tiny sign change look like a large physical impulse.
+    const length = Math.min(1.7, Math.log1p(mag) * 0.35),
+      head = Math.min(8 / z, length * 0.4),
       end = {
         x: origin.x + (v.x / mag) * length,
         y: origin.y + (v.y / mag) * length,
@@ -191,8 +194,8 @@ export function paint(
     c.rotate(Math.atan2(v.y, v.x));
     c.beginPath();
     c.moveTo(0, 0);
-    c.lineTo(-8 / z, -3 / z);
-    c.lineTo(-8 / z, 3 / z);
+    c.lineTo(-head, -head * 3 / 8);
+    c.lineTo(-head, head * 3 / 8);
     c.closePath();
     c.fillStyle = "#111";
     c.fill();

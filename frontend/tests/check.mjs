@@ -335,3 +335,39 @@ const chainAfter = editGeometry(chainBefore, "box", resized(resizedBox, 5, { x: 
 nearPoint(resolve(chainAfter.items[2].ends[0], chainAfter.items).p, { x: -.5, y: 0 });
 validate(chainAfter);
 console.log("PASS attachment release after shrink and indirect connector chains");
+
+// Near-zero acceleration must not jump to a minimum 0.3 m arrow or blink
+// at the old 0.002 cutoff. Test actual Canvas commands, not a duplicate formula.
+const vectorLines = [];
+const vectorContext = new Proxy({}, {
+  get: (_, key) => key === "measureText" ? () => ({ width: 10 }) :
+    key === "lineTo" ? (x, y) => vectorLines.push({ x, y }) : () => {},
+  set: () => true,
+});
+const vectorCanvas = { ...canvas, getContext: () => vectorContext };
+const observedBody = make("rect", "observed");
+observedBody.derived = Array(20).fill(0);
+const accelerationArrow = (x) => {
+  observedBody.derived[0] = x;
+  vectorLines.length = 0;
+  paint(vectorCanvas, { version: 2, items: [observedBody] }, { x: 0, y: 0, scale: 90 }, null, false, true);
+  assert.equal(observedBody.derived[0], x, "drawing must not filter physical data");
+  return vectorLines.map(p => ({ ...p }));
+};
+assert.equal(accelerationArrow(0).length, 0);
+let previousLength = 0;
+for (const magnitude of [.0001, .001, .00199, .00201, .01, 1, 10, 1e5]) {
+  const positive = accelerationArrow(magnitude), negative = accelerationArrow(-magnitude);
+  assert.equal(positive.length, 3);
+  assert.equal(negative.length, 3);
+  const length = positive[0].x;
+  assert.ok(length >= previousLength && length <= 1.7);
+  assert.ok(Math.abs(positive[1].x) <= length, "head cannot exceed shaft");
+  assert.ok(Math.abs(length + negative[0].x) < 1e-12);
+  if (magnitude <= .01) assert.ok(2 * length * 90 < 1, "small sign reversal stays below one pixel at normal zoom");
+  previousLength = length;
+}
+const below = accelerationArrow(.00199)[0].x;
+const above = accelerationArrow(.00201)[0].x;
+assert.ok((above - below) * 90 < .001, "continuous around the old cutoff");
+console.log("PASS continuous small-vector rendering with bounded arrowheads and unchanged physical values");
