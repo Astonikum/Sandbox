@@ -248,6 +248,48 @@ export function center(o: Geometry, items: Item[]) {
 export function editGeometry(s: Scene, id: string, patch: Patch): Scene {
   const original = s.items.find((o) => o.id === id);
   if (!original || !geo(original)) return s;
+  // Reshaping is not a rigid transform of the welded assembly. Keep other
+  // objects and surviving anchors at their world positions in the editor.
+  if (body(original) && ("w" in patch || "h" in patch)) {
+    const changed = { ...original, ...patch } as BodyItem;
+    const remap = (a: Attachment | null, bearing = false): Attachment | null => {
+      if (!a || a.id !== id) return a;
+      const p = world(original, a.local);
+      const stays = changed.kind === "rod" && !bearing
+        ? ([0, 1] as const).some(e => {
+            const q = endpoint(changed, e);
+            return Math.hypot(p.x - q.x, p.y - q.y) < 1e-8;
+          })
+        : inside(changed, p, 1e-8);
+      return stays ? { ...a, local: local(changed, p) } : null;
+    };
+    return { ...s, items: s.items.map(o => {
+      if (effect(o)) return o;
+      if (o.id === id) {
+        if (changed.kind !== "rod") return changed;
+        return { ...changed, ends: changed.ends.map((a, e) => {
+          if (!a) return null;
+          const p = endpoint(changed, e as 0 | 1), q = resolve(a, s.items).p;
+          return Math.hypot(p.x - q.x, p.y - q.y) < 1e-8 ? a : null;
+        }) as Geometry["ends"] };
+      }
+      const ends = o.ends.map(a => remap(a)) as Geometry["ends"];
+      if (!connector(o)) return { ...o, ends };
+      const bindings = o.bindings.map(a => remap(a, true)).filter((a): a is Attachment => !!a);
+      // A bearing with no remaining bindings stays where it was displayed.
+      const p = center(o, s.items);
+      const next = { ...o, ...p, ends, bindings };
+      // A detached flexible end must not jump back to its stale stored pose.
+      if (o.kind === "spring" || o.kind === "rope") {
+        const a = endAt(o, 0, s.items), b = endAt(o, 1, s.items);
+        next.x = (a.x + b.x) / 2;
+        next.y = (a.y + b.y) / 2;
+        next.w = Math.max(.001, Math.hypot(b.x - a.x, b.y - a.y));
+        next.angle = Math.atan2(b.y - a.y, b.x - a.x);
+      }
+      return next;
+    }) };
+  }
   const changed = { ...original, ...patch } as Geometry,
     delta = changed.angle - original.angle,
     joined = new Set([id]);

@@ -272,3 +272,66 @@ execFileSync(process.env.CXX || "g++", [
   "-std=c++17", "-O2", "../engine/tests/conservation.cpp", "-o", "../engine/build/conservation.exe",
 ], { windowsHide: true });
 execFileSync("../engine/build/conservation.exe", [], { stdio: "inherit", windowsHide: true });
+
+// Resizing a lever must not drag the assembly attached at its unchanged end.
+for (const angle of [0, .6, Math.PI / 2]) {
+  const beam = { ...make("rod", "beam"), angle };
+  const fixedEnd = endpoint(beam, 0), draggedEnd = endpoint(beam, 1);
+  const support = make("rect", "support", fixedEnd.x, fixedEnd.y);
+  beam.ends[0] = { id: support.id, local: { x: 0, y: 0 } };
+  const spring = make("spring", "spring", 5, 5);
+  spring.ends[0] = { id: beam.id, local: { x: -1, y: 0 } };
+  spring.ends[1] = { id: beam.id, local: { x: 1, y: 0 } };
+  const pin = make("bearing", "pin", fixedEnd.x, fixedEnd.y);
+  pin.bindings = [{ id: beam.id, local: { x: -1, y: 0 } }];
+  const before = numberScene({ version: 2, items: [beam, support, spring, pin] });
+  const snapshot = structuredClone(before);
+  const patch = resized(beam, 1, { x: 3, y: 2 }, before.items);
+  const after = editGeometry(before, beam.id, patch);
+  const edited = after.items[0];
+  nearPoint(endpoint(edited, 0), fixedEnd);
+  assert.deepEqual(after.items[1], before.items[1]);
+  nearPoint(resolve(after.items[2].ends[0], after.items).p, fixedEnd);
+  assert.equal(after.items[2].ends[1], null);
+  nearPoint(endpoint(after.items[2], 1), draggedEnd);
+  nearPoint(resolve(after.items[3].bindings[0], after.items).p, fixedEnd);
+  assert.deepEqual(before, snapshot, "undo snapshot unchanged");
+  assert.deepEqual(validate(JSON.parse(JSON.stringify(after))), after);
+  assert.ok(linksFor(after).some(l => l.kind === 12));
+  const released = attachScene(after, beam.id);
+  nearPoint(endpoint(released.items[0], 0), fixedEnd);
+  nearPoint(resolve(released.items[2].ends[0], released.items).p, fixedEnd);
+  assert.equal(released.items[2].ends[1], null);
+  assert.deepEqual(released.items[1], before.items[1]);
+  assert.deepEqual(removeItem(after, "beam").items.find(o => o.id === "pin").bindings, []);
+}
+// Side resizing keeps both the support and the body's attachment point stationary.
+const resizedBox = make("rect", "box");
+const attachedRod = make("rod", "attached", -1.5, 0);
+attachedRod.ends[1] = { id: "box", local: { x: -.5, y: 0 } };
+const pairBefore = { version: 2, items: [resizedBox, attachedRod] };
+const pairAfter = editGeometry(pairBefore, "box", resized(resizedBox, 5, { x: 2, y: 0 }, pairBefore.items));
+nearPoint(resolve(pairAfter.items[1].ends[1], pairAfter.items).p, { x: -.5, y: 0 });
+nearPoint(pairAfter.items[1], attachedRod);
+console.log("PASS reshape attachments: fixed world anchors, detached ends, bearing, snapshots and round-trip");
+
+// Shrinking away from an anchor releases it instead of leaving a phantom weld.
+const pinAtEdge = make("bearing", "edgePin", .5, 0);
+pinAtEdge.bindings = [{ id: "box", local: { x: .5, y: 0 } }];
+const rightRod = make("rod", "rightRod", 1.5, 0);
+rightRod.ends[0] = { id: "box", local: { x: .5, y: 0 } };
+const shrinkBefore = { version: 2, items: [resizedBox, pinAtEdge, rightRod] };
+const shrinkAfter = editGeometry(shrinkBefore, "box", resized(resizedBox, 5, { x: 0, y: 0 }, shrinkBefore.items));
+assert.equal(shrinkAfter.items[2].ends[0], null);
+assert.equal(shrinkAfter.items[1].bindings.length, 0);
+nearPoint(shrinkAfter.items[1], pinAtEdge);
+// References through a flexible connector still resolve to the same world point.
+const chainSpring = make("spring", "chainSpring", -1.5, 0);
+chainSpring.ends[1] = { id: "box", local: { x: -.5, y: 0 } };
+const chainRope = make("rope", "chainRope");
+chainRope.ends[0] = { id: "chainSpring", point: 1, local: { x: 0, y: 0 } };
+const chainBefore = { version: 2, items: [resizedBox, chainSpring, chainRope] };
+const chainAfter = editGeometry(chainBefore, "box", resized(resizedBox, 5, { x: 2, y: 0 }, chainBefore.items));
+nearPoint(resolve(chainAfter.items[2].ends[0], chainAfter.items).p, { x: -.5, y: 0 });
+validate(chainAfter);
+console.log("PASS attachment release after shrink and indirect connector chains");
