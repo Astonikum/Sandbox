@@ -1,0 +1,56 @@
+{
+  "version": 2,
+  "items": [
+    {
+      "id": "1",
+      "kind": "surface",
+      "x": 0,
+      "y": 1.6,
+      "w": 4,
+      "h": 0.15,
+      "angle": 0,
+      "fixed": true,
+      "ends": [
+        null,
+        null
+      ],
+      "mass": 0,
+      "mu": 0.3,
+      "restitution": 0,
+      "vx": 0,
+      "vy": 0,
+      "omega": 0
+    },
+    {
+      "id": "2",
+      "kind": "rect",
+      "x": 0,
+      "y": 0,
+      "w": 1,
+      "h": 1,
+      "angle": 0,
+      "fixed": false,
+      "ends": [
+        null,
+        null
+      ],
+      "mass": 1,
+      "mu": 0.3,
+      "restitution": 0,
+      "vx": 0,
+      "vy": 0,
+      "omega": 0
+    },
+    {
+      "id": "3",
+      "kind": "acceleration",
+      "vector": {
+        "x": 0,
+        "y": 9.81
+      },
+      "scope": "all",
+      "targets": [],
+      "gravity": true
+    }
+  ]
+}

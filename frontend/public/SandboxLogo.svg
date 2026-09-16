@@ -1,0 +1,25 @@
+<svg version="1.2" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 720" width="720" height="720">
+	<style>
+		.s0 { fill: #ffffff;stroke: #000000;stroke-miterlimit:10;stroke-width: 29 } 
+		.s1 { fill: #ffffff;stroke: #000000;stroke-miterlimit:10;stroke-width: 19 } 
+		.s2 { fill: #747474;stroke: #000000;stroke-miterlimit:10;stroke-width: 19 } 
+		.s3 { fill: #747474;stroke: #000000;stroke-miterlimit:10;stroke-width: 9 } 
+	</style>
+	<g id="Layer 1">
+		<g id="Папка 1">
+			<path id="Фигура 1" fill-rule="evenodd" class="s0" d="m606 445v1h-491v-1z"/>
+			<path id="Фигура 2 copy" fill-rule="evenodd" class="s1" d="m132 574.73l100.81-128.73z"/>
+			<path id="Фигура 2 copy 9" fill-rule="evenodd" class="s1" d="m107 526l64.81-80z"/>
+			<path id="Фигура 2 copy 2" fill-rule="evenodd" class="s1" d="m199 574.73l100.81-128.73z"/>
+			<path id="Фигура 2 copy 3" fill-rule="evenodd" class="s1" d="m263 574.73l100.81-128.73z"/>
+			<path id="Фигура 2 copy 4" fill-rule="evenodd" class="s1" d="m324 574.73l100.81-128.73z"/>
+			<path id="Фигура 2 copy 5" fill-rule="evenodd" class="s1" d="m387 574.73l100.81-128.73z"/>
+			<path id="Фигура 2 copy 6" fill-rule="evenodd" class="s1" d="m449 574.73l100.81-128.73z"/>
+			<path id="Фигура 2 copy 7" fill-rule="evenodd" class="s1" d="m514 573.57l99-126.42z"/>
+			<path id="Фигура 2" fill-rule="evenodd" class="s2" d="m297.68 437.66c-80.56 0-145.68-65.41-145.68-146.33 0-80.92 65.12-146.33 145.68-146.33 80.57 0 145.69 65.41 145.69 146.33 0 80.92-65.12 146.33-145.69 146.33z"/>
+			<path id="Фигура 3" fill-rule="evenodd" class="s3" d="m291 291.91h256z"/>
+			<path id="Фигура 4" fill-rule="evenodd" class="s3" d="m541 290.91l-45-35z"/>
+			<path id="Фигура 5" fill-rule="evenodd" class="s3" d="m543 290.91l-52.54 31.52z"/>
+		</g>
+	</g>
+</svg>

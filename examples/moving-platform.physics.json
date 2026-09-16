@@ -1,0 +1,61 @@
+{
+  "version": 2,
+  "items": [
+    {
+      "id": "1",
+      "kind": "surface",
+      "x": 0,
+      "y": 1.6,
+      "w": 4,
+      "h": 0.15,
+      "angle": 0,
+      "fixed": true,
+      "ends": [
+        null,
+        null
+      ],
+      "mass": 0,
+      "mu": 0.3,
+      "restitution": 0,
+      "vx": 0,
+      "vy": 0,
+      "omega": 0,
+      "trajectory": {
+        "x": "0",
+        "y": "1.6 - 0.2*sin(2*pi*t)",
+        "angle": "0"
+      }
+    },
+    {
+      "id": "2",
+      "kind": "rect",
+      "x": 0,
+      "y": 1.025,
+      "w": 1,
+      "h": 1,
+      "angle": 0,
+      "fixed": false,
+      "ends": [
+        null,
+        null
+      ],
+      "mass": 1,
+      "mu": 0.3,
+      "restitution": 0,
+      "vx": 0,
+      "vy": 0,
+      "omega": 0
+    },
+    {
+      "id": "3",
+      "kind": "acceleration",
+      "vector": {
+        "x": 0,
+        "y": 9.81
+      },
+      "scope": "all",
+      "targets": [],
+      "gravity": true
+    }
+  ]
+}

@@ -1,0 +1,88 @@
+{
+  "version": 2,
+  "items": [
+    {
+      "id": "1",
+      "kind": "rod",
+      "x": 1,
+      "y": 0,
+      "w": 2,
+      "h": 0.12,
+      "angle": 0,
+      "fixed": false,
+      "ends": [
+        null,
+        {
+          "id": "3",
+          "local": {
+            "x": 0,
+            "y": 0
+          }
+        }
+      ],
+      "mass": 1,
+      "mu": 0.3,
+      "restitution": 0,
+      "vx": 0,
+      "vy": 0,
+      "omega": 0
+    },
+    {
+      "id": "2",
+      "kind": "bearing",
+      "x": 0,
+      "y": 0,
+      "w": 0.16,
+      "h": 0.16,
+      "angle": 0,
+      "fixed": true,
+      "ends": [
+        null,
+        null
+      ],
+      "length": 2,
+      "stiffness": 30,
+      "damping": 0.5,
+      "bindings": [
+        {
+          "id": "1",
+          "local": {
+            "x": -1,
+            "y": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "3",
+      "kind": "circle",
+      "x": 2,
+      "y": 0,
+      "w": 0.4,
+      "h": 0.4,
+      "angle": 0,
+      "fixed": false,
+      "ends": [
+        null,
+        null
+      ],
+      "mass": 1,
+      "mu": 0.3,
+      "restitution": 0,
+      "vx": 0,
+      "vy": 0,
+      "omega": 0
+    },
+    {
+      "id": "4",
+      "kind": "acceleration",
+      "vector": {
+        "x": 0,
+        "y": 9.81
+      },
+      "scope": "all",
+      "targets": [],
+      "gravity": true
+    }
+  ]
+}

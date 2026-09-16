@@ -1,0 +1,74 @@
+{
+  "version": 2,
+  "items": [
+    {
+      "id": "1",
+      "kind": "rect",
+      "x": 0,
+      "y": 0,
+      "w": 0.3,
+      "h": 0.3,
+      "angle": 0,
+      "fixed": true,
+      "ends": [
+        null,
+        null
+      ],
+      "mass": 0,
+      "mu": 0.3,
+      "restitution": 0,
+      "vx": 0,
+      "vy": 0,
+      "omega": 0
+    },
+    {
+      "id": "2",
+      "kind": "rod",
+      "x": 1,
+      "y": 0,
+      "w": 2,
+      "h": 0.12,
+      "angle": 0,
+      "fixed": false,
+      "ends": [
+        {
+          "id": "1",
+          "local": {
+            "x": 0,
+            "y": 0
+          }
+        },
+        null
+      ],
+      "mass": 1,
+      "mu": 0.3,
+      "restitution": 0,
+      "vx": 0,
+      "vy": 0,
+      "omega": 0
+    },
+    {
+      "id": "3",
+      "kind": "acceleration",
+      "vector": {
+        "x": 0,
+        "y": 9.81
+      },
+      "scope": "all",
+      "targets": [],
+      "gravity": true
+    },
+    {
+      "id": "4",
+      "kind": "force",
+      "vector": {
+        "x": 0,
+        "y": 10
+      },
+      "scope": "selection",
+      "targets": [
+        "2"
+      ]
+    }
+  ]
+}

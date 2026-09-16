@@ -1,0 +1,68 @@
+@import "tailwindcss";
+:root {
+  font-family: Inter, "Segoe UI", Arial, sans-serif;
+  color: #202020;
+  background: #fff;
+  font-synthesis: none;
+  font-size: 13px;
+  font-weight: 400;
+  -webkit-font-smoothing: antialiased;
+  color-scheme: light;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+}
+button,
+input,
+select {
+  font: inherit;
+}
+button {
+  cursor: pointer;
+  color: inherit;
+  background: none;
+  border: 0;
+}
+button:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+button:hover:not(:disabled) {
+  background: #ececea;
+}
+button:active:not(:disabled) {
+  background: #ddd;
+}
+button:focus-visible,
+input:focus-visible,
+summary:focus-visible {
+  outline: 2px solid #555;
+  outline-offset: 2px;
+}
+input {
+  min-width: 0;
+  color: inherit;
+}
+button,
+input {
+  border-radius: 3px;
+}
+small {
+  font-size: 11px;
+}
+h2,
+p {
+  margin: 0;
+}
+svg text {
+  user-select: none;
+}
+button {
+  transition: background 0.12s;
+}
+::selection {
+  background: #ddd;
+}

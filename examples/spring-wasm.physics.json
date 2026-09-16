@@ -1,0 +1,86 @@
+{
+  "version": 2,
+  "items": [
+    {
+      "id": "1",
+      "kind": "surface",
+      "x": 0,
+      "y": 0,
+      "w": 2,
+      "h": 0.15,
+      "angle": 0,
+      "fixed": true,
+      "ends": [
+        null,
+        null
+      ],
+      "mass": 0,
+      "mu": 0.3,
+      "restitution": 0,
+      "vx": 0,
+      "vy": 0,
+      "omega": 0
+    },
+    {
+      "id": "2",
+      "kind": "rect",
+      "x": 0,
+      "y": 2,
+      "w": 0.5,
+      "h": 0.5,
+      "angle": 0,
+      "fixed": false,
+      "ends": [
+        null,
+        null
+      ],
+      "mass": 1,
+      "mu": 0.3,
+      "restitution": 0,
+      "vx": 0,
+      "vy": 0,
+      "omega": 0
+    },
+    {
+      "id": "3",
+      "kind": "spring",
+      "x": 0,
+      "y": 1,
+      "w": 2,
+      "h": 0.2,
+      "angle": 1.5707963267948966,
+      "fixed": false,
+      "ends": [
+        {
+          "id": "1",
+          "local": {
+            "x": 0,
+            "y": 0
+          }
+        },
+        {
+          "id": "2",
+          "local": {
+            "x": 0,
+            "y": 0
+          }
+        }
+      ],
+      "length": 1.5,
+      "stiffness": 30,
+      "damping": 0.5,
+      "bindings": []
+    },
+    {
+      "id": "4",
+      "kind": "acceleration",
+      "vector": {
+        "x": 0,
+        "y": 9.81
+      },
+      "scope": "all",
+      "targets": [],
+      "gravity": true
+    }
+  ]
+}

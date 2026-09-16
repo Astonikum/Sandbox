@@ -1,0 +1,107 @@
+{
+  "version": 2,
+  "items": [
+    {
+      "id": "1",
+      "kind": "pulley",
+      "x": 0,
+      "y": 0,
+      "w": 1,
+      "h": 1,
+      "angle": 0,
+      "fixed": true,
+      "ends": [
+        null,
+        null
+      ],
+      "mass": 1,
+      "mu": 0.3,
+      "restitution": 0,
+      "vx": 0,
+      "vy": 0,
+      "omega": 0
+    },
+    {
+      "id": "2",
+      "kind": "rect",
+      "x": -0.5,
+      "y": 2,
+      "w": 0.3,
+      "h": 0.3,
+      "angle": 0,
+      "fixed": false,
+      "ends": [
+        null,
+        null
+      ],
+      "mass": 1,
+      "mu": 0.3,
+      "restitution": 0,
+      "vx": 0,
+      "vy": 0,
+      "omega": 0
+    },
+    {
+      "id": "3",
+      "kind": "rect",
+      "x": 0.5,
+      "y": 2,
+      "w": 0.3,
+      "h": 0.3,
+      "angle": 0,
+      "fixed": false,
+      "ends": [
+        null,
+        null
+      ],
+      "mass": 2,
+      "mu": 0.3,
+      "restitution": 0,
+      "vx": 0,
+      "vy": 0,
+      "omega": 0
+    },
+    {
+      "id": "4",
+      "kind": "rope",
+      "x": 0,
+      "y": 2,
+      "w": 1,
+      "h": 0.2,
+      "angle": 0,
+      "fixed": false,
+      "ends": [
+        {
+          "id": "2",
+          "local": {
+            "x": 0,
+            "y": 0
+          }
+        },
+        {
+          "id": "3",
+          "local": {
+            "x": 0,
+            "y": 0
+          }
+        }
+      ],
+      "length": 5.570796326794897,
+      "stiffness": 30,
+      "damping": 0.5,
+      "bindings": [],
+      "via": "1"
+    },
+    {
+      "id": "5",
+      "kind": "acceleration",
+      "vector": {
+        "x": 0,
+        "y": 9.81
+      },
+      "scope": "all",
+      "targets": [],
+      "gravity": true
+    }
+  ]
+}
