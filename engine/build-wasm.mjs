@@ -3,6 +3,7 @@ import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
+import { homedir } from "node:os";
 const root = dirname(fileURLToPath(import.meta.url));
 const out = resolve(root, "../frontend/public/engine");
 const inputs = [
@@ -25,7 +26,8 @@ if (
   process.exit(0);
 }
 const sdk =
-  process.env.EMSDK || (process.platform === "win32" ? "D:/Tools/emsdk" : "");
+  process.env.EMSDK ||
+  (process.platform === "win32" ? "D:/Tools/emsdk" : resolve(homedir(), ".local/share/emsdk"));
 const compiler = resolve(sdk, "upstream/emscripten/em++.py");
 if (!sdk || !existsSync(compiler))
   throw Error(
@@ -36,7 +38,9 @@ const python =
   process.env.EMSDK_PYTHON ||
   (process.platform === "win32"
     ? resolve(sdk, "python/3.13.3_64bit/python.exe")
-    : "python3");
+    : existsSync(resolve(sdk, "python/3.13.3_64bit/bin/python3"))
+      ? resolve(sdk, "python/3.13.3_64bit/bin/python3")
+      : "python3");
 const exports = [
   "input",
   "output",
