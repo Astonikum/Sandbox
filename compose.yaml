@@ -1,0 +1,6 @@
+services:
+  sandbox:
+    build: .
+    ports:
+      - "0.0.0.0:8080:80"
+    restart: unless-stopped

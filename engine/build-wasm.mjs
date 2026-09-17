@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, chmodSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
@@ -86,6 +86,7 @@ execFileSync(
     env: { ...process.env, EM_CONFIG: resolve(sdk, ".emscripten") },
   },
 );
+chmodSync(resolve(out, "physics.wasm"), 0o644);
 writeFileSync(
   stamp,
   JSON.stringify({ emscripten: "6.0.9", sourceHash: digest }, null, 2) + "\n",

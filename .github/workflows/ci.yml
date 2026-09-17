@@ -1,0 +1,66 @@
+name: Build, test and publish
+on:
+  pull_request:
+  push:
+    branches: [master]
+    tags: ['v*']
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build and run C++, WASM, lint and TypeScript checks
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: sandbox:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Smoke test static image
+        run: |
+          docker run -d --name sandbox-ci -p 8080:80 sandbox:ci
+          trap 'docker logs sandbox-ci; docker rm -f sandbox-ci' EXIT
+          curl --fail --retry 10 --retry-connrefused --retry-delay 1 http://localhost:8080/ -o /tmp/index.html
+          grep -q '<div id="root">' /tmp/index.html
+          curl --fail http://localhost:8080/engine/physics.mjs -o /tmp/physics.mjs
+          curl --fail http://localhost:8080/engine/physics.wasm -o /tmp/physics.wasm
+          test "$(od -An -tx1 -N4 /tmp/physics.wasm | tr -d ' \n')" = 0061736d
+      - name: Image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha
+            type=ref,event=tag
+      - name: Sign in to GHCR
+        if: github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish tested image
+        if: github.event_name == 'push'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
