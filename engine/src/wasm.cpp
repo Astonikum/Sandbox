@@ -59,10 +59,19 @@ int engine_tick(int drag,double x,double y){
   struct Swept {int i;double x0,x1,y0,y1,speed;};
   static std::vector<Swept> swept;
   swept.resize(bodies.size());
-  for(size_t i=0;i<bodies.size();++i){const auto& b=bodies[i];double speed=norm(b.v)+std::abs(b.omega)*std::hypot(b.w,b.h)/2,reach=speed*H+.5*std::abs(gravity)*H*H,ex=extent(b,{1,0})+reach,ey=extent(b,{0,1})+reach;V center=contactCenter(b);swept[i]={(int)i,center.x-ex,center.x+ex,center.y-ey,center.y+ey,speed};}
+  for(size_t i=0;i<bodies.size();++i){const auto& b=bodies[i];double acceleration=norm(forces[i]*b.inv()+V{0,gravity}),speed=norm(b.v)+std::abs(b.omega)*std::hypot(b.w,b.h)/2+acceleration*H,reach=speed*H,ex=extent(b,{1,0})+reach,ey=extent(b,{0,1})+reach;V center=contactCenter(b);swept[i]={(int)i,center.x-ex,center.x+ex,center.y-ey,center.y+ey,speed};}
   std::sort(swept.begin(),swept.end(),[](const Swept& a,const Swept& b){return a.x0<b.x0;});
   for(size_t i=0;i<swept.size();++i)for(size_t j=i+1;j<swept.size()&&swept[j].x0<=swept[i].x1;++j){const auto& aa=swept[i];const auto& bb=swept[j];const auto& a=bodies[aa.i];const auto& b=bodies[bb.i];if(aa.y1<bb.y0||bb.y1<aa.y0||(a.inv()==0&&b.inv()==0))continue;maxDt=std::min(maxDt,.2*std::min({a.w,a.h,b.w,b.h})/std::max(aa.speed+bb.speed,1e-9));}
-  for(const auto& l:links)if(l.kind==3&&l.k>0){double inv=bodies[l.a].inv()+(l.b>=0?bodies[l.b].inv():0);if(inv>0)maxDt=std::min(maxDt,.15/std::sqrt(l.k*inv));}
+  for(const auto& l:links)if(l.kind==3){
+    const auto& a=bodies[l.a];const Body* b=l.b>=0?&bodies[l.b]:nullptr;
+    // Include rotational compliance and damping in the explicit spring limit.
+    // A light rod loaded at an end can be much stiffer than its mass suggests.
+    double inv=a.inv()+dot(l.la,l.la)*a.ii()+(b?b->inv()+dot(l.lb,l.lb)*b->ii():0);
+    if(inv>0){
+      if(l.k>0)maxDt=std::min(maxDt,.15/std::sqrt(l.k*inv));
+      if(l.damping>0)maxDt=std::min(maxDt,.5/(l.damping*inv));
+    }
+  }
   int sub=(int)std::ceil(H/maxDt);if(sub>256){valid=false;return 3;}
   double dt=H/sub;
   for(int s=0;s<sub;++s){double t=tick*H+(s+1)*dt;for(size_t i=0;i<bodies.size();++i)if(driven[i]){auto px=paths[i][0].at(t),py=paths[i][1].at(t),pa=paths[i][2].at(t);bodies[i].p={px.v,py.v};bodies[i].v={px.d,py.d};bodies[i].angle=pa.v;bodies[i].omega=pa.d;}

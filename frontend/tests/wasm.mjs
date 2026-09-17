@@ -358,3 +358,37 @@ assert.ok(Math.abs(inertial[3] - 2) < 1e-12 && Math.abs(inertial[4] + 3) < 1e-12
 assert.ok(Math.abs(inertial[5] - 4) < 1e-12, "free angular momentum conserved");
 assert.ok(Math.abs(inertial[0] - 2) < 1e-10 && Math.abs(inertial[1] + 3) < 1e-10);
 console.log("PASS joint kinematics/impulse/energy: free fall, constant-force work, free translation and rotation");
+
+// A level resting body must not invent friction or alternating acceleration.
+const restingBox = [...base], lineSupport = [...floor];
+restingBox[3] = restingBox[4] = 1;
+restingBox[7] = .3;
+lineSupport[0] = 9;
+lineSupport[2] = 1.6;
+lineSupport[3] = 4;
+lineSupport[4] = .15;
+lineSupport[7] = .3;
+reset([restingBox, lineSupport]);
+ticks(480);
+for (let i = 0; i < 480; i++) {
+  ticks(1);
+  const d = derived(), state = sample();
+  assert.ok(Math.hypot(d[6], d[7]) < 1e-8, "no manufactured resting friction");
+  assert.ok(Math.hypot(d[0], d[1]) < 1e-8, "no alternating resting acceleration");
+  assert.ok(Math.abs(d[5] + 9.81) < 1e-8, "steady support reaction");
+  assert.ok(Math.abs(state[5]) < 1e-8, "no contact-induced rocking");
+}
+console.log("PASS stable resting contact: friction, acceleration, reaction and angular velocity over 2 seconds");
+
+// Strong damping needs its own explicit time-step limit, even when k is zero.
+const dampedBody = [...base];
+dampedBody[1] = 1; dampedBody[9] = 1;
+reset([dampedBody], 0, [[3, 0, -1, 0, 0, 0, 0, 0, 0, 1, 0, 5000]]);
+ticks(60);
+assert.ok(sample().every(Number.isFinite));
+assert.ok(Math.abs(sample()[3]) < 1e-8);
+reset([dampedBody], 0, [[3, 0, -1, 0, 0, 0, 0, 0, 0, 1, 0, 1e7]]);
+assert.equal(engine._engine_tick(-1, 0, 0), 3, "reject excessive stiffness before corrupting state");
+assert.equal(engine._engine_time(), 0);
+assert.ok(sample().every(Number.isFinite));
+console.log("PASS damping stability and bounded rejection without advancing the scene");

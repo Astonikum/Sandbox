@@ -129,28 +129,49 @@ void contact(Body &a, Body &b) {
   V t = perp(n);
   auto fa = feature(a, n, t), fb = feature(b, n * (-1), t);
   double lo = std::max(fa.first, fb.first), hi = std::min(fa.second, fb.second);
+  if (lo > hi + 1e-6) return;
   int contacts=hi-lo>1e-6?2:1;
+  V points[2], ra[2], rb[2];
+  double vn[2], rhs[2], j[2]={0,0};
+  int count=0;
   for(int ci=0;ci<contacts;++ci){
-  double tangent=contacts==1?(lo+hi)*.5:ci==0?lo:hi;
-  double ha=faceHeight(a,n,t,tangent),hb=-faceHeight(b,n*(-1),t,tangent);
-  if(ha-hb < -.00002)continue;
-  V cp=n*((ha+hb)*.5)+t*tangent;
-  V ra = cp - a.p, rb = cp - b.p, rv = velocity(b, rb) - velocity(a, ra);
-  double vn = dot(rv, n);
-  if (vn >= 0)
-    continue;
-  double denom = ia + ib + std::pow(cross(ra, n), 2) * a.ii() +
-                 std::pow(cross(rb, n), 2) * b.ii();
-  double j = -(1 + (vn < -.1 ? std::min(a.e, b.e) : 0)) * vn / denom;
-  impulse(a, n * (-j), ra,1);
-  impulse(b, n * j, rb,1);
-  rv = velocity(b, rb) - velocity(a, ra);
-  double jt = -dot(rv, t) / (ia + ib + std::pow(cross(ra, t), 2) * a.ii() +
-                             std::pow(cross(rb, t), 2) * b.ii());
-  jt = std::clamp(jt, -j * std::sqrt(a.mu * b.mu), j * std::sqrt(a.mu * b.mu));
-  impulse(a, t * (-jt), ra,2);
-  impulse(b, t * jt, rb,2);
+    double tangent=contacts==1?(lo+hi)*.5:ci==0?lo:hi;
+    double ha=faceHeight(a,n,t,tangent),hb=-faceHeight(b,n*(-1),t,tangent);
+    if(ha-hb < -.00002)continue;
+    points[count]=n*((ha+hb)*.5)+t*tangent;
+    ra[count]=points[count]-a.p;rb[count]=points[count]-b.p;
+    vn[count]=dot(velocity(b,rb[count])-velocity(a,ra[count]),n);
+    rhs[count]=-(1+(vn[count]<-.1?std::min(a.e,b.e):0))*vn[count];
+    ++count;
   }
+  if(!count)return;
+  auto matrix=[&](int i,int k){return ia+ib+cross(ra[i],n)*cross(ra[k],n)*a.ii()+cross(rb[i],n)*cross(rb[k],n)*b.ii();};
+  double k00=matrix(0,0);
+  if(count==1)j[0]=std::max(0.,rhs[0]/k00);
+  else {
+    // Solve both support points together: sequential impulses rock a resting
+    // rectangle and manufacture alternating friction even on a level floor.
+    double k01=matrix(0,1),k11=matrix(1,1),det=k00*k11-k01*k01;
+    if(det>1e-20){j[0]=(k11*rhs[0]-k01*rhs[1])/det;j[1]=(k00*rhs[1]-k01*rhs[0])/det;}
+    if(det<=1e-20||j[0]<0||j[1]<0){
+      j[0]=std::max(0.,rhs[0]/k00);j[1]=0;
+      if(k01*j[0]<rhs[1]){j[0]=0;j[1]=std::max(0.,rhs[1]/k11);}
+    }
+  }
+  double total=0;
+  V cp{};
+  for(int i=0;i<count;++i){
+    impulse(a,n*(-j[i]),ra[i],1);impulse(b,n*j[i],rb[i],1);
+    total+=j[i];cp=cp+points[i]*j[i];
+  }
+  if(total<=0)return;
+  cp=cp*(1/total);
+  V ar=cp-a.p,br=cp-b.p;
+  double jt=-dot(velocity(b,br)-velocity(a,ar),t)/(ia+ib+std::pow(cross(ar,t),2)*a.ii()+std::pow(cross(br,t),2)*b.ii());
+  double limit=total*std::sqrt(a.mu*b.mu);
+  jt=std::clamp(jt,-limit,limit);
+  impulse(a,t*(-jt),ar,2);impulse(b,t*jt,br,2);
+
 }
 void constrain(std::vector<Body> &bs, const Link &l) {
   if (l.a < 0 || l.a >= (int)bs.size())

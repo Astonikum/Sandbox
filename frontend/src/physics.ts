@@ -84,6 +84,14 @@ export function linksFor(s: Scene): Link[] {
         )
           continue;
         const b = resolve(anchor, s.items);
+        // An explicit bearing replaces the weld at this end, including when
+        // it was placed after the rod had already attached to the body.
+        const pivot = s.items.some((pin) => pin.kind === "bearing" &&
+          pin.bindings.some((a) => a.id === o.id &&
+            Math.hypot(a.local.x - local(o, endpoint(o, e)).x,
+              a.local.y - local(o, endpoint(o, e)).y) <= pin.w / 2 + .001) &&
+          pin.bindings.some((a) => resolve(a, s.items).body?.id === b.body?.id));
+        if (pivot) continue;
         add(
           o.id,
           target?.kind === "bearing" ? 2 : 12,
