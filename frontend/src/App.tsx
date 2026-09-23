@@ -4,6 +4,7 @@ import { FolderOpenIcon } from "@phosphor-icons/react/dist/csr/FolderOpen";
 import { DownloadSimpleIcon } from "@phosphor-icons/react/dist/csr/DownloadSimple";
 import { ArrowCounterClockwiseIcon } from "@phosphor-icons/react/dist/csr/ArrowCounterClockwise";
 import { ArrowClockwiseIcon } from "@phosphor-icons/react/dist/csr/ArrowClockwise";
+import { FlowArrowIcon } from "@phosphor-icons/react/dist/csr/FlowArrow";
 import { GridFourIcon } from "@phosphor-icons/react/dist/csr/GridFour";
 import { CrosshairSimpleIcon } from "@phosphor-icons/react/dist/csr/CrosshairSimple";
 import { PlayIcon } from "@phosphor-icons/react/dist/csr/Play";
@@ -25,7 +26,6 @@ import {
   initial,
   make,
   nextId,
-  targets,
   attachScene,
   editGeometry,
   removeItem,
@@ -162,11 +162,11 @@ function VectorFields({
 }) {
   const magnitude = Math.hypot(value.x, value.y);
   const [zeroAngle, setZeroAngle] = useState(0);
-  const angle = magnitude > 0 ? Math.atan2(value.y, value.x) * 180 / Math.PI : zeroAngle;
+  const angle = magnitude > 0 ? Math.atan2(-value.y, value.x) * 180 / Math.PI : zeroAngle;
   const setPolar = (length: number, degrees: number) => {
     setZeroAngle(degrees);
     const radians = degrees * Math.PI / 180;
-    onChange({ x: length * Math.cos(radians), y: length * Math.sin(radians) });
+    onChange({ x: length * Math.cos(radians), y: -length * Math.sin(radians) });
   };
   return (
     <div className="vector-fields">
@@ -175,17 +175,16 @@ function VectorFields({
       <div className="pair">
         <Num label={`${label}: угол к X`} value={angle} unit="°"
           disabled={disabled} onChange={(n) => setPolar(magnitude, n)} />
-        <Num label={`${label}: угол к Y`} value={angle - 90} unit="°"
-          disabled={disabled} onChange={(n) => setPolar(magnitude, n + 90)} />
+        <Num label={`${label}: угол к Y`} value={angle + 90} unit="°"
+          disabled={disabled} onChange={(n) => setPolar(magnitude, n - 90)} />
       </div>
-      <small>Углы по часовой стрелке · Y направлена вниз</small>
       <details>
         <summary>Проекции X/Y</summary>
         <div className="pair">
           <Num label={`${label}ₓ`} value={value.x} unit={unit} disabled onChange={() => {}} />
           <Num label={`${label}ᵧ`} value={value.y} unit={unit} disabled onChange={() => {}} />
         </div>
-        <small>X = |{label}| cos α; Y = |{label}| sin α</small>
+        <small>X = |{label}| cos α; Y = −|{label}| sin α</small>
       </details>
     </div>
   );
@@ -212,6 +211,8 @@ export default function App() {
   const [scene, setScene] = useState<Scene>(() => structuredClone(initial)),
     [selected, setSelected] = useState<string | null>("2"),
     [grid, setGrid] = useState(true),
+    [showAuto, setShowAuto] = useState(false),
+    [preview, setPreview] = useState<{ source: Scene; scene: Scene } | null>(null),
     [pending, setPending] = useState<Pending | null>(null),
     [running, setRunning] = useState(false),
     [busy, setBusy] = useState(false),
@@ -231,7 +232,7 @@ export default function App() {
     noticeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const camera = useRef<Camera>({ x: 0, y: 0.7, scale: 90 }),
     cameraTarget = useRef<Camera>({ x: 0, y: 0.7, scale: 90 }),
-    state = useRef({ selected, grid, pending, running }),
+    state = useRef({ selected, grid, pending, running, showAuto }),
     hover = useRef<string | null>(null),
     space = useRef(false),
     drag = useRef<{ id: string; x: number; y: number } | null>(null);
@@ -309,8 +310,30 @@ export default function App() {
       cameraTarget.current = fit(current.current, rect.width, rect.height);
   };
   useEffect(() => {
-    state.current = { selected, grid, pending, running };
-  }, [selected, grid, pending, running]);
+    state.current = { selected, grid, pending, running, showAuto };
+  }, [selected, grid, pending, running, showAuto]);
+  useEffect(() => {
+    if (running) return;
+    display.current = scene;
+    if (!showAuto || !scene.items.some(body)) return;
+    let cancelled = false;
+    const runtime = new Simulation(scene, () => null, (calculated) => {
+      if (cancelled) return;
+      const values = new Map(calculated.items.filter(body).map(b => [b.id, b]));
+      const view = { ...scene, items: scene.items.map(o => {
+        const b = values.get(o.id);
+        return body(o) && b ? { ...o, vx: b.vx, vy: b.vy, omega: b.omega, derived: b.derived, forceSamples: b.forceSamples } : o;
+      }) };
+      display.current = view;
+      setPreview({ source: scene, scene: view });
+    }, () => {});
+    const timer = setTimeout(() => {
+      void runtime.start("preview").catch(e => {
+        if (!cancelled) tell(`Автовекторы: ${e instanceof Error ? e.message : String(e)}`, true);
+      });
+    }, 150);
+    return () => { cancelled = true; clearTimeout(timer); runtime.stop(); };
+  }, [scene, showAuto, running]);
   useEffect(() => {
     const el = canvas.current!;
     const resize = new ResizeObserver(() => {
@@ -357,6 +380,7 @@ export default function App() {
         st.running,
         ids,
         hover.current,
+        st.showAuto,
       );
       raf = requestAnimationFrame(frame);
     };
@@ -805,6 +829,9 @@ export default function App() {
         </Tool>
         <Tool label="Центрировать систему" onClick={centerView}>
           <CrosshairSimpleIcon />
+        </Tool>
+        <Tool label="Автовекторы" active={showAuto} onClick={() => setShowAuto(!showAuto)}>
+          <FlowArrowIcon />
         </Tool>
         <span className="spacer" />
         <Tool
@@ -1309,7 +1336,7 @@ export default function App() {
           <section>
             <h2>Переменные</h2>
             <div className="scroll variables">
-              {scene.items.map((o) => (
+              {(showAuto && !running && preview?.source === scene ? preview.scene : scene).items.map((o) => (
                 <details key={o.id} open={o.id === selected || effect(o)}>
                   <summary>
                     {o.kind === "acceleration" && o.gravity
@@ -1343,30 +1370,14 @@ export default function App() {
                         label={`v_${indexLabel(o)}`}
                         value={{ x: o.vx, y: o.vy }}
                         unit="м/с"
+                        disabled={showAuto && !running}
                         onChange={(v) => change(o.id, { vx: v.x, vy: v.y })}
                       />
-                      {o.derived ? (
+                      {(running || showAuto) && o.derived &&
                         observed.map(([label, i, unit]) => (
                           <div key={i}>{variableVector(o, label, i, unit)}</div>
-                        ))
-                      ) : (
-                        <VectorFields
-                          label={`Fтяж_${indexLabel(o)}`}
-                          value={scene.items
-                            .filter(effect)
-                            .filter((e) => e.gravity && targets(e, [o]).length)
-                            .reduce(
-                              (v, e) => ({
-                                x: v.x + e.vector.x * o.mass,
-                                y: v.y + e.vector.y * o.mass,
-                              }),
-                              { x: 0, y: 0 },
-                            )}
-                          unit="Н"
-                          disabled
-                          onChange={() => {}}
-                        />
-                      )}
+                        ))}
+
                     </>
                   ) : o.kind !== "bearing" ? (
                     <>

@@ -56,6 +56,8 @@ const exports = [
   "trajectory",
   "gravity_vector",
   "observables",
+  "force_count",
+  "force_output",
   "relax",
 ].map((n) => "_engine_" + n);
 execFileSync(

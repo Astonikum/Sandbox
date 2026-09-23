@@ -207,7 +207,7 @@ for (const running of [false, true]) {
     moving.derived = Array(20).fill(0);
     moving.derived[3] = 9.81;
   }
-  paint(canvas, { version: 2, items: [moving] }, { x: 0, y: 0, scale: 80 }, null, false, running);
+  paint(canvas, { version: 2, items: [moving] }, { x: 0, y: 0, scale: 80 }, null, false, running, [], null, true);
   assert.ok(labels.includes("v"));
   if (running) assert.ok(labels.includes("Fтяж"));
 }
@@ -339,9 +339,11 @@ console.log("PASS attachment release after shrink and indirect connector chains"
 // Near-zero acceleration must not jump to a minimum 0.3 m arrow or blink
 // at the old 0.002 cutoff. Test actual Canvas commands, not a duplicate formula.
 const vectorLines = [];
+let shaftStart;
 const vectorContext = new Proxy({}, {
   get: (_, key) => key === "measureText" ? () => ({ width: 10 }) :
-    key === "lineTo" ? (x, y) => vectorLines.push({ x, y }) : () => {},
+    key === "moveTo" ? (x, y) => { if (!shaftStart) shaftStart = { x, y }; } :
+    key === "lineTo" ? (x, y) => vectorLines.push(vectorLines.length ? { x, y } : { x: x - shaftStart.x, y: y - shaftStart.y }) : () => {},
   set: () => true,
 });
 const vectorCanvas = { ...canvas, getContext: () => vectorContext };
@@ -350,6 +352,7 @@ observedBody.derived = Array(20).fill(0);
 const accelerationArrow = (x) => {
   observedBody.derived[0] = x;
   vectorLines.length = 0;
+  shaftStart = undefined;
   paint(vectorCanvas, { version: 2, items: [observedBody] }, { x: 0, y: 0, scale: 90 }, null, false, true);
   assert.equal(observedBody.derived[0], x, "drawing must not filter physical data");
   return vectorLines.map(p => ({ ...p }));
@@ -361,8 +364,8 @@ for (const magnitude of [.0001, .001, .00199, .00201, .01, 1, 10, 1e5]) {
   assert.equal(positive.length, 3);
   assert.equal(negative.length, 3);
   const length = positive[0].x;
-  assert.ok(length >= previousLength && length <= 1.7);
-  assert.ok(Math.abs(positive[1].x) <= length, "head cannot exceed shaft");
+  assert.ok(length >= previousLength - 1e-12 && length <= 1.7 + 1e-12);
+  assert.ok(Math.abs(positive[1].x) <= length + 1e-12, "head cannot exceed shaft");
   assert.ok(Math.abs(length + negative[0].x) < 1e-12);
   if (magnitude <= .01) assert.ok(2 * length * 90 < 1, "small sign reversal stays below one pixel at normal zoom");
   previousLength = length;
@@ -371,3 +374,123 @@ const below = accelerationArrow(.00199)[0].x;
 const above = accelerationArrow(.00201)[0].x;
 assert.ok((above - below) * 90 < .001, "continuous around the old cutoff");
 console.log("PASS continuous small-vector rendering with bounded arrowheads and unchanged physical values");
+
+// Placing a bearing on an existing rod/body joint releases relative rotation.
+const jointBody = make("rect", "jb", 0, 0);
+const jointRod = make("rod", "jr", 1.5, 0);
+jointRod.ends[0] = { id: jointBody.id, local: { x: .5, y: 0 } };
+const jointPin = make("bearing", "jp", .5, 0);
+const bearingScene = attachScene(numberScene({ version: 2, items: [jointBody, jointRod, jointPin] }), jointPin.id);
+for (const scene of [bearingScene, validate(JSON.parse(JSON.stringify(bearingScene)))]) {
+  const links = linksFor(scene);
+  assert.equal(links.filter(l => l.kind === 12).length, 0);
+  assert.equal(links.filter(l => l.kind === 2).length, 1);
+}
+assert.equal(linksFor(removeItem(bearingScene, jointPin.id)).filter(l => l.kind === 12).length, 1);
+labels.length = 0;
+paint(canvas, initial, { x: 0, y: 0, scale: 90 }, null, false, false);
+assert.ok(labels.includes("g"), "gravity acceleration is visible before simulation");
+assert.ok(!labels.includes("Fтяж"), "automatic gravity force hidden before simulation");
+labels.length = 0;
+paint(canvas, initial, { x: 0, y: 0, scale: 90 }, null, false, false, [], null, true);
+assert.ok(labels.includes("Fтяж"), "auto-vector toggle reveals calculated gravity force");
+console.log("PASS bearing overrides an existing weld, round-trip, removal and visible gravity acceleration");
+
+const automatic = make("rect", "auto");
+automatic.vx = 2;
+automatic.derived = Array(20).fill(0);
+automatic.derived[0] = 3;
+automatic.derived[6] = 4;
+automatic.forceSamples = [{ source: 0, category: 2, point: {x:0,y:.5}, vector: {x:4,y:0} }];
+for (const [running, enabled, expected] of [[false, false, false], [false, true, true], [true, false, true]]) {
+  labels.length = 0;
+  paint(canvas, { version: 2, items: [automatic] }, { x: 0, y: 0, scale: 90 }, null, false, running, [], null, enabled);
+  for (const name of ["v", "a", "Fтр"]) assert.equal(labels.includes(name), expected, name);
+}
+const manual = make("force", "manual");
+manual.scope = "selection"; manual.targets = [automatic.id]; manual.vector = { x: 2, y: 0 };
+labels.length = 0;
+paint(canvas, { version: 2, items: [automatic, manual] }, { x: 0, y: 0, scale: 90 }, null, false, false);
+assert.ok(labels.includes("F"));
+assert.ok(!labels.includes("Fтр"));
+console.log("PASS manual vectors remain visible; derived vectors require simulation or explicit toggle");
+
+// Capture shaft origins without changing the renderer's physical geometry.
+const origins = [];
+const positionsContext = new Proxy({}, {
+  get: (_, key) => key === 'measureText' ? () => ({width:10}) :
+    key === 'moveTo' ? (x,y) => origins.push({x,y}) : () => {},
+  set: () => true,
+});
+const positionsCanvas = {...canvas, getContext: () => positionsContext};
+const fieldScene = structuredClone(initial);
+fieldScene.items.push(make('rect', 'extra', 2, 0));
+const gravityOrigin = () => {
+  origins.length = 0;
+  paint(positionsCanvas, fieldScene, {x:0,y:0,scale:90}, null, false, false);
+  // The surface supplies one segment before g; each arrow has a shaft and head.
+  return origins.at(-2);
+};
+const originalGravity = {...gravityOrigin()};
+fieldScene.items[1].x += 4;
+fieldScene.items[3].y += 4;
+assert.deepEqual(gravityOrigin(), originalGravity, 'g stays fixed in world coordinates');
+labels.length = 0;
+paint(canvas, fieldScene, {x:0,y:0,scale:90}, null, false, false);
+assert.equal(labels.filter(x=>x==='g').length, 1, 'one field marker, not one per body');
+const applied = make('rect','applied',1,1);
+applied.derived = Array(20).fill(0);
+applied.forceSamples = [{source:0,category:1,point:{x:.2,y:.5},vector:{x:0,y:-10}}];
+origins.length = 0;
+paint(positionsCanvas,{version:2,items:[applied]},{x:0,y:0,scale:90},null,false,true);
+assert.deepEqual(origins[0],{x:1.2,y:1.5},'reaction starts at contact');
+assert.deepEqual(origins[2],{x:1.2,y:1.5},'weight acts on support at contact, not at body center');
+console.log('PASS world gravity marker and physical reaction/weight application points');
+
+// Even a crowded scene must keep force captions beside their arrow tips.
+const captionLines = [], forceCaptions = [];
+const captionContext = new Proxy({}, {
+  get: (_, key) => key === 'measureText' ? () => ({width:10/90}) :
+    key === 'lineTo' ? (x,y) => captionLines.push({x,y}) :
+    key === 'fillText' ? (name,x,y) => {if(name==='F') forceCaptions.push({x,y});} : () => {},
+  set: () => true,
+});
+const crowdedBody = make('rect','crowded');
+crowdedBody.w = crowdedBody.h = 10;
+const crowdedForce = make('force','crowded-force');
+crowdedForce.vector = {x:10,y:0};
+crowdedForce.scope = 'all';
+for (const scale of [30,90,300]) {
+  captionLines.length = forceCaptions.length = 0;
+  paint({...canvas,getContext:()=>captionContext},{version:2,items:[crowdedBody,crowdedForce]},
+    {x:0,y:0,scale},null,false,false);
+  const tip = captionLines[0], caption = forceCaptions[0];
+  assert.ok(Math.abs(caption.y-tip.y)*scale<=16.001,'caption cannot drift vertically');
+  const edgeGap = Math.min(Math.abs(caption.x-tip.x),Math.abs(caption.x+20/90-tip.x))*scale;
+  assert.ok(edgeGap<=6.001,'caption remains adjacent at every zoom');
+}
+console.log('PASS force captions stay beside arrow tips in crowded scenes at all zoom levels');
+
+// Shared/unassigned acceleration gets one world marker; single-body stays local.
+const fieldBodyA = make('rect','field-a',1,1), fieldBodyB = make('rect','field-b',2,1);
+for (const [scope, targetIds, count, shared] of [
+  ['all', [], 1, true], ['all', [], 2, true],
+  ['selection', [], 2, true], ['selection', ['field-a','field-b'], 2, true],
+  ['selection', ['field-a'], 2, false],
+]) {
+  const acceleration = make('acceleration','field-acceleration');
+  acceleration.scope=scope; acceleration.targets=targetIds; acceleration.vector={x:0,y:3};
+  const scene={version:2,items:[fieldBodyA,...(count===2?[fieldBodyB]:[]),acceleration]};
+  const position=()=>{
+    origins.length=0;
+    paint(positionsCanvas,scene,{x:0,y:0,scale:90},null,false,false);
+    assert.equal(origins.length,2,'exactly one acceleration arrow');
+    return {...origins[0]};
+  };
+  const before=position();
+  fieldBodyA.y+=.1; fieldBodyB.y+=.1;
+  const after=position();
+  if(shared) assert.deepEqual(after,before,'shared field independent of bodies');
+  else assert.ok(Math.abs(after.y-before.y-.1)<1e-10,'single-body acceleration follows its body');
+}
+console.log('PASS global, group, unassigned and single-body acceleration placement');

@@ -4,6 +4,7 @@ import { defineConfig } from "vite";
 
 // https://vite.dev/config/
 export default defineConfig({
+  base: "./",
   plugins: [react(), tailwindcss()],
   server: { host: "0.0.0.0", port: 8080, strictPort: true },
   preview: { host: "0.0.0.0", port: 8080, strictPort: true },

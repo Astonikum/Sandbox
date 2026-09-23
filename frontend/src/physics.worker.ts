@@ -24,6 +24,17 @@ const fields: Record<string, number> = {
   vy: 10,
   omega: 11,
 };
+function forceSamples() {
+  const count = engine._engine_force_count();
+  const start = engine._engine_force_output() / 8;
+  const values = engine.HEAPF64.subarray(start, start + count * 7);
+  const result: NonNullable<BodyItem["forceSamples"]>[] = bodies.map(() => []);
+  for (let i = 0; i < values.length; i += 7) {
+    const [bodyIndex, category, x, y, fx, fy, source] = values.subarray(i, i + 7);
+    result[bodyIndex].push({ source, category, point: { x, y }, vector: { x: fx, y: fy } });
+  }
+  return result;
+}
 function check(code: number) {
   if (code)
     throw Error(
@@ -177,6 +188,21 @@ async function initialize(s: Scene, mode: string) {
   });
   for (const o of s.items) if (effect(o) && o.kind === "velocity") velocity(o);
   effects();
+  if (mode === "preview") {
+    // Probe one fixed step on this isolated worker. The editor retains its
+    // original geometry, parameters, history and simulation clock.
+    check(engine._engine_tick(-1, 0, 0));
+    check(engine._engine_sample(engine._engine_time()));
+    const state = engine.HEAPF64.slice(engine._engine_output() / 8,
+      engine._engine_output() / 8 + bodies.length * 6);
+    const derived = engine.HEAPF64.slice(engine._engine_observables() / 8,
+      engine._engine_observables() / 8 + bodies.length * 20);
+    postMessage({ type: "ready" });
+    postMessage({ type: "frame", state, rendered: state, derived, forceSamples: forceSamples(),
+      time: 0, cost: 0, dropped: 0, settled: true, residual: 0 },
+      { transfer: [state.buffer, derived.buffer] });
+    return;
+  }
   postMessage({ type: "ready" });
 }
 self.onmessage = async ({ data }) => {
@@ -234,6 +260,7 @@ self.onmessage = async ({ data }) => {
         rendered,
         state,
         derived,
+        forceSamples: forceSamples(),
         time: t,
         cost: performance.now() - began,
         dropped: clock.dropped,

@@ -1,5 +1,5 @@
 # Build the engine from source; no checked-in WASM is used in this image.
-FROM emscripten/emsdk:6.0.9 AS build
+FROM --platform=$BUILDPLATFORM emscripten/emsdk:6.0.9 AS build
 WORKDIR /app/frontend
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci

@@ -1,4 +1,5 @@
 name: Build, test and publish
+
 on:
   pull_request:
   push:
@@ -19,7 +20,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
-      - name: Build and run C++, WASM, lint and TypeScript checks
+      - name: Build and test the WASM engine and frontend
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -27,7 +28,7 @@ jobs:
           tags: sandbox:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
-      - name: Smoke test static image
+      - name: Smoke test the web image
         run: |
           docker run -d --name sandbox-ci -p 8080:80 sandbox:ci
           trap 'docker logs sandbox-ci; docker rm -f sandbox-ci' EXIT
@@ -36,6 +37,11 @@ jobs:
           curl --fail http://localhost:8080/engine/physics.mjs -o /tmp/physics.mjs
           curl --fail http://localhost:8080/engine/physics.wasm -o /tmp/physics.wasm
           test "$(od -An -tx1 -N4 /tmp/physics.wasm | tr -d ' \n')" = 0061736d
+      - name: Check version tag format
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          TAG: ${{ github.ref_name }}
+        run: node -e 'if (!/^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(process.env.TAG)) { console.error("Tag must use vMAJOR.MINOR.PATCH format"); process.exit(1); }'
       - name: Image metadata
         id: meta
         uses: docker/metadata-action@v5
@@ -45,7 +51,7 @@ jobs:
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
             type=sha
             type=ref,event=tag
-      - name: Check publication credentials
+      - name: Check Docker Hub credentials
         id: publication
         if: github.event_name == 'push'
         env:
@@ -62,12 +68,87 @@ jobs:
         with:
           username: astonikum
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - name: Publish tested image
+      - name: Publish the tested multi-platform image
         if: steps.publication.outputs.enabled == 'true'
         uses: docker/build-push-action@v6
         with:
           context: .
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  release:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: docker
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      release_id: ${{ steps.create.outputs.release_id }}
+    steps:
+      - name: Create the version's draft release
+        id: create
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft --title "$TAG" --generate-notes
+          fi
+          echo "release_id=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json databaseId --jq .databaseId)" >> "$GITHUB_OUTPUT"
+
+  desktop:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            bundles: dmg
+          - os: windows-latest
+            bundles: msi
+          - os: ubuntu-24.04
+            bundles: deb,appimage
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - uses: emscripten-core/setup-emsdk@v15
+        with:
+          version: 6.0.9
+      - name: Install Linux app build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.os == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: frontend/src-tauri -> target
+      - run: npm ci
+        working-directory: frontend
+      - name: Set the desktop app version from its release tag
+        env:
+          TAG: ${{ github.ref_name }}
+        run: node --input-type=module -e 'import { readFileSync, writeFileSync } from "node:fs"; const path = "src-tauri/tauri.conf.json"; const config = JSON.parse(readFileSync(path, "utf8")); config.version = process.env.TAG.slice(1); writeFileSync(path, JSON.stringify(config, null, 2) + "\n");'
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          APPLE_SIGNING_IDENTITY: ${{ matrix.os == 'macos-latest' && '-' || '' }}
+        with:
+          projectPath: frontend
+          releaseId: ${{ needs.release.outputs.release_id }}
+          args: --bundles ${{ matrix.bundles }}${{ matrix.os == 'macos-latest' && ' --target universal-apple-darwin' || '' }}
+          uploadUpdaterJson: false

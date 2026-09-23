@@ -392,3 +392,41 @@ assert.equal(engine._engine_tick(-1, 0, 0), 3, "reject excessive stiffness befor
 assert.equal(engine._engine_time(), 0);
 assert.ok(sample().every(Number.isFinite));
 console.log("PASS damping stability and bounded rejection without advancing the scene");
+
+// An extreme spring used to overflow the substep int conversion and trap WASM.
+const tiny = [...base];
+tiny[3] = tiny[4] = .001;
+tiny[6] = .001;
+reset([tiny], 0, [[3, 0, -1, 1, 0, 1000, 0, 0, 0, 1, 1e7, 1e7, -1]]);
+assert.equal(engine._engine_tick(-1, 0, 0), 3, "unsupported stiffness returns a controlled error");
+reset();
+ticks(1);
+assert.ok(sample().every(Number.isFinite), "engine can restart after rejecting extreme stiffness");
+console.log("PASS extreme spring parameters do not trap WASM");
+
+function forceSamples() {
+  const count = engine._engine_force_count(), start = engine._engine_force_output()/8;
+  return Array.from({length:count},(_,i)=>Array.from(engine.HEAPF64.subarray(start+i*7,start+(i+1)*7)));
+}
+reset([base,floor]);
+ticks(240);
+let samples = forceSamples();
+const normal = samples.find(f=>f[0]===0 && f[1]===1);
+assert.ok(normal && Math.abs(normal[3]-.05)<.001, 'normal acts on bottom face');
+assert.ok(normal[5]<0, 'support pushes upward');
+const opposite = samples.find(f=>f[0]===1 && f[1]===1);
+assert.ok(Math.abs(normal[5]+opposite[5])<1e-8, 'contact action and reaction balance');
+// Distinct springs must remain visible even when their forces cancel.
+reset([base],0,[[3,0,-1,-1,0,-.05,0,0,0,.5,10,0], [3,0,-1,1,0,.05,0,0,0,.5,10,0]]);
+ticks(1);
+samples=forceSamples().filter(f=>f[0]===0&&f[1]===3);
+assert.equal(samples.length,2);
+assert.ok(samples.some(f=>Math.abs(f[2]+.05)<1e-10&&f[4]<0));
+assert.ok(samples.some(f=>Math.abs(f[2]-.05)<1e-10&&f[4]>0));
+assert.ok(Math.abs(samples.reduce((sum,f)=>sum+f[4],0)-derived()[8])<1e-8);
+// Weight includes the tangential force exerted on the support.
+reset([sliding,floor]);
+ticks(1);
+assert.ok(Math.abs(derived()[6])>0);
+assert.ok(Math.abs(derived()[16]+derived()[4]+derived()[6])<1e-8);
+console.log('PASS force application points, opposing springs, action/reaction and weight with friction');

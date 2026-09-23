@@ -22,6 +22,13 @@ V rot(V a, double r) {
   return {a.x * cos(r) - a.y * sin(r), a.x * sin(r) + a.y * cos(r)};
 }
 V perp(V a) { return {-a.y, a.x}; }
+struct ForceSample {
+  int source, category, slot;
+  V impulse{}, localPoint{};
+  double weight=0;
+};
+// Identifies the current contact pair or link while accumulating one tick.
+inline thread_local int forceSource=0;
 struct Body {
   int kind;
   V p, v;
@@ -30,6 +37,7 @@ struct Body {
   bool kinematic = false;
   V normalImpulse{}, frictionImpulse{}, springImpulse{}, jointImpulse{}, ropeImpulse{}, externalImpulse{};
   double torqueImpulse=0;
+  std::vector<ForceSample> forceSamples;
   mutable double cachedAngle=std::numeric_limits<double>::quiet_NaN();
   mutable V cachedX{},cachedY{};
   V axis(int i)const{if(angle!=cachedAngle){cachedAngle=angle;cachedX={std::cos(angle),std::sin(angle)};cachedY={-cachedX.y,cachedX.x};}return i?cachedY:cachedX;}
@@ -49,7 +57,16 @@ struct Link {
   mutable double material=0;
   mutable bool initialized=false;
 };
-void impulse(Body &a, V j, V r, int category=0) {
+void impulse(Body &a, V j, V r, int category=0, int slot=0) {
+  const double weight=std::hypot(j.x,j.y);
+  if(category && weight>0 && std::isfinite(weight)){
+    auto it=std::find_if(a.forceSamples.begin(),a.forceSamples.end(),[&](const ForceSample& f){return f.source==forceSource&&f.category==category&&f.slot==slot;});
+    if(it==a.forceSamples.end()){a.forceSamples.push_back({forceSource,category,slot});it=std::prev(a.forceSamples.end());}
+    // Stable weighted average, also for subnormal resting impulses.
+    double next=it->weight+weight;
+    it->localPoint=it->localPoint*(it->weight/next)+V{dot(r,a.axis(0)),dot(r,a.axis(1))}*(weight/next);
+    it->weight=next;it->impulse=it->impulse+j;
+  }
   a.v = a.v + j * a.inv();
   a.omega += cross(r, j) * a.ii();
   if(category==1)a.normalImpulse=a.normalImpulse+j;
@@ -165,7 +182,8 @@ void contact(Body &a, Body &b) {
     total+=j[i];cp=cp+points[i]*j[i];
   }
   if(total<=0)return;
-  cp=cp*(1/total);
+  // Tiny resting impulses can be subnormal: 1/total would overflow.
+  cp={cp.x/total,cp.y/total};
   V ar=cp-a.p,br=cp-b.p;
   double jt=-dot(velocity(b,br)-velocity(a,ar),t)/(ia+ib+std::pow(cross(ar,t),2)*a.ii()+std::pow(cross(br,t),2)*b.ii());
   double limit=total*std::sqrt(a.mu*b.mu);
@@ -194,12 +212,12 @@ void constrain(std::vector<Body> &bs, const Link &l) {
     double length=std::sqrt(da*da-radius*radius)+std::sqrt(db*db-radius*radius)+radius*arc,error=length-l.length;
     if(error< -1e-5){l.initialized=false;return;}
     double ca=cross(ra,na),cb=cross(rb,nb),den=a.inv()+b->inv()+dot(np,np)*p.inv()+ca*ca*a.ii()+cb*cb*b->ii();
-    if(den>0){double c=std::max(0.,error)*.8/den;a.p=a.p-na*(c*a.inv());b->p=b->p-nb*(c*b->inv());p.p=p.p-np*(c*p.inv());a.angle-=ca*c*a.ii();b->angle-=cb*c*b->ii();double j=-std::max(0.,dot(velocity(a,ra),na)+dot(velocity(*b,rb),nb)+dot(p.v,np))/den;impulse(a,na*j,ra,5);impulse(*b,nb*j,rb,5);impulse(p,np*j,{},5);}
+    if(den>0){double c=std::max(0.,error)*.8/den;a.p=a.p-na*(c*a.inv());b->p=b->p-nb*(c*b->inv());p.p=p.p-np*(c*p.inv());a.angle-=ca*c*a.ii();b->angle-=cb*c*b->ii();double j=-std::max(0.,dot(velocity(a,ra),na)+dot(velocity(*b,rb),nb)+dot(p.v,np))/den;impulse(a,na*j,ra,5);impulse(*b,nb*j,rb,5);impulse(p,na*(-j),perp(na)*radius,5,1);impulse(p,nb*(-j),perp(nb)*(-radius),5,2);}
     // No slip: the material coordinate on the first strand is coupled to Iω.
     double q=std::sqrt(da*da-radius*radius)-radius*ta;
     if(!l.initialized){l.material=q+radius*p.angle;l.initialized=true;}
     double inertiaDen=a.inv()+p.inv()+ca*ca*a.ii()+radius*radius*p.ii();
-    if(inertiaDen>0){double c=(q+radius*p.angle-l.material)*.8/inertiaDen;a.p=a.p-na*(c*a.inv());p.p=p.p+na*(c*p.inv());a.angle-=ca*c*a.ii();p.angle-=radius*c*p.ii();double j=-(dot(velocity(a,ra)-p.v,na)+radius*p.omega)/inertiaDen;impulse(a,na*j,ra,5);impulse(p,na*(-j),{},5);p.omega+=radius*j*p.ii();p.torqueImpulse+=radius*j;}
+    if(inertiaDen>0){double c=(q+radius*p.angle-l.material)*.8/inertiaDen;a.p=a.p-na*(c*a.inv());p.p=p.p+na*(c*p.inv());a.angle-=ca*c*a.ii();p.angle-=radius*c*p.ii();double j=-(dot(velocity(a,ra)-p.v,na)+radius*p.omega)/inertiaDen;impulse(a,na*j,ra,5);impulse(p,na*(-j),perp(na)*radius,5,1);}
     return;
   }
   if (l.kind == 10 && b) {
@@ -263,6 +281,7 @@ void step(std::vector<Body> &bs, const std::vector<Link> &links,
   }
   for (auto &l : links)
     if (l.kind == 3 && l.a >= 0) {
+      forceSource=static_cast<int>(&l-links.data());
       auto &a = bs[l.a];
       Body *b = l.b >= 0 ? &bs[l.b] : nullptr;
       V ra = rot(l.la, a.angle), rb = b ? rot(l.lb, b->angle) : V{},
@@ -285,8 +304,10 @@ void step(std::vector<Body> &bs, const std::vector<Link> &links,
   bounds.resize(bs.size());
   for (int iter = 0; iter < 24; ++iter) {
     for (auto &l : links)
-      if (l.kind != 3)
+      if (l.kind != 3) {
+        forceSource=static_cast<int>(&l-links.data());
         constrain(bs, l);
+      }
     if(iter%4==0){
       for(size_t i=0;i<bs.size();++i){const auto& b=bs[i];double ex=extent(b,{1,0})+.0001,ey=extent(b,{0,1})+.0001;V center=contactCenter(b);bounds[i]={i,center.x-ex,center.x+ex,center.y-ey,center.y+ey};}
       std::sort(bounds.begin(),bounds.end(),[](const Bounds& a,const Bounds& b){return a.x0==b.x0?a.i<b.i:a.x0<b.x0;});
@@ -294,6 +315,6 @@ void step(std::vector<Body> &bs, const std::vector<Link> &links,
       for(size_t i=0;i<bounds.size();++i)for(size_t j=i+1;j<bounds.size()&&bounds[j].x0<=bounds[i].x1;++j){auto a=bounds[i],b=bounds[j];if(a.y1<b.y0||b.y1<a.y0||joined[a.i*bs.size()+b.i]||(bs[a.i].inv()==0&&bs[b.i].inv()==0))continue;pairs.emplace_back(std::min(a.i,b.i),std::max(a.i,b.i));}
       std::sort(pairs.begin(),pairs.end());
     }
-    for(auto pair:pairs)contact(bs[pair.first],bs[pair.second]);
+    for(auto pair:pairs){forceSource=-1-static_cast<int>(pair.first*bs.size()+pair.second);contact(bs[pair.first],bs[pair.second]);}
   }
 }

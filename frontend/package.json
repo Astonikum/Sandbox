@@ -4,10 +4,13 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "test": "node ../engine/build-wasm.mjs && node tests/check.mjs && node tests/wasm.mjs",
+    "test": "node ../engine/build-wasm.mjs && node tests/check.mjs && node tests/wasm.mjs && node tests/worker.mjs",
     "dev": "node ../engine/build-wasm.mjs && vite",
     "build": "node ../engine/build-wasm.mjs && tsc -b && vite build",
     "build:wasm": "node ../engine/build-wasm.mjs",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build",
     "lint": "oxlint src tests vite.config.ts",
     "preview": "vite preview"
   },
@@ -18,6 +21,7 @@
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.3",
+    "@tauri-apps/cli": "^2.11.5",
     "@types/node": "^24.13.3",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",

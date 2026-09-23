@@ -1,4 +1,4 @@
-import type { Patch, Scene } from "./model";
+import type { BodyItem, Patch, Scene } from "./model";
 import { body } from "./model";
 export type Metrics = {
   time: number;
@@ -21,6 +21,7 @@ export class Simulation {
   private config: Scene;
   private state: Float64Array | undefined;
   private rendered: Float64Array | undefined;
+  private forceSamples: BodyItem["forceSamples"][] = [];
   private derived: Float64Array | undefined;
   private metrics: Metrics = {
     time: 0,
@@ -52,7 +53,7 @@ export class Simulation {
     this.onError = onError;
     document.addEventListener("visibilitychange", this.visibility);
   }
-  start(mode: "dynamic" | "static" = "dynamic") {
+  start(mode: "dynamic" | "static" | "preview" = "dynamic") {
     return new Promise<void>((resolve, reject) => {
       const timeout = (this.timer = setTimeout(() => {
         reject(Error("Не удалось загрузить WebAssembly за 20 секунд."));
@@ -70,7 +71,7 @@ export class Simulation {
         if (data.type === "ready") {
           clearTimeout(timeout);
           resolve();
-          this.raf = requestAnimationFrame(this.frame);
+          if (mode !== "preview") this.raf = requestAnimationFrame(this.frame);
           return;
         }
         if (data.type === "error") {
@@ -85,6 +86,7 @@ export class Simulation {
           this.state = data.state;
           this.rendered = data.rendered;
           this.derived = data.derived;
+          this.forceSamples = data.forceSamples;
           this.metrics = {
             ...this.metrics,
             time: data.time,
@@ -93,6 +95,10 @@ export class Simulation {
             settled: !!data.settled,
             residual: data.residual,
           };
+          if (mode === "preview") {
+            this.onFrame(this.sceneAt(data.state), this.sceneAt(data.rendered), this.metrics);
+            this.stop();
+          }
         }
       };
       this.worker.postMessage({ type: "init", scene: this.config, mode });
@@ -125,6 +131,7 @@ export class Simulation {
           vx,
           vy,
           omega,
+          forceSamples: this.forceSamples[index],
           derived: this.derived
             ? Array.from(this.derived.subarray(index * 20, (index + 1) * 20))
             : undefined,

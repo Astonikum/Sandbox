@@ -38,6 +38,7 @@ export type BodyItem = Geometry & {
   omega: number;
   trajectory?: { x: string; y: string; angle: string };
   derived?: number[];
+  forceSamples?: { source: number; category: number; point: Vec; vector: Vec }[];
 };
 export type Connector = Geometry & {
   kind: "spring" | "rope" | "bearing";
@@ -673,6 +674,6 @@ export function validate(value: unknown): Scene {
       throw Error("Отсутствует блок");
   }
   return JSON.parse(
-    JSON.stringify(numberScene(s), (key, v) => (key === "derived" ? undefined : v)),
+    JSON.stringify(numberScene(s), (key, v) => (key === "derived" || key === "forceSamples" ? undefined : v)),
   );
 }

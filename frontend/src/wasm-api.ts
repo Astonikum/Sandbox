@@ -21,6 +21,8 @@ export type WasmEngine = {
   _engine_trajectory(i: number, enabled: number): number;
   _engine_gravity_vector(i: number, x: number, y: number): number;
   _engine_observables(): number;
+  _engine_force_count(): number;
+  _engine_force_output(): number;
   _engine_relax(): number;
 };
 export const STEP = 1 / 240;

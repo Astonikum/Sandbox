@@ -8,6 +8,7 @@ constexpr double H=1./240.;
 double input[MAX_BODIES*STRIDE+MAX_LINKS*16];
 double output[MAX_BODIES*6];
 double observables[MAX_BODIES*20];
+std::vector<double> forceOutput;
 std::array<V,MAX_BODIES> gravityVectors{},beforeVelocity{};
 std::array<double,MAX_BODIES> beforeOmega{};
 double history[HISTORY][MAX_BODIES*6];
@@ -28,6 +29,14 @@ double* engine_input(){return input;}
 double* engine_output(){return output;}
 char* engine_formulas(){return formulas;}
 double* engine_observables(){return observables;}
+int engine_force_count(){
+ forceOutput.clear();
+ for(size_t i=0;i<bodies.size();++i)for(const auto& f:bodies[i].forceSamples){
+  forceOutput.insert(forceOutput.end(),{static_cast<double>(i),static_cast<double>(f.category),f.localPoint.x,f.localPoint.y,f.impulse.x/H,f.impulse.y/H,static_cast<double>(f.source*3+f.slot)});
+ }
+ return static_cast<int>(forceOutput.size()/7);
+}
+double* engine_force_output(){return forceOutput.data();}
 int engine_reset(int count,int nlinks,double g){
  if(count<1||count>MAX_BODIES||nlinks<0||nlinks>MAX_LINKS||!bounded(g)||std::abs(g)>100)return 1;
  bodies.resize(count);forces.resize(count);links.resize(nlinks);driven.fill(false);gravityVectors.fill({});std::fill(std::begin(observables),std::end(observables),0);gravity=g;tick=0;valid=true;
@@ -52,7 +61,7 @@ int engine_trajectory(int i,int enabled){
 int engine_tick(int drag,double x,double y){
  if(!valid||drag< -1||drag>=(int)bodies.size()||!bounded(x)||!bounded(y))return 1;
  try{
-  for(size_t i=0;i<bodies.size();++i){auto& b=bodies[i];beforeVelocity[i]=b.v;beforeOmega[i]=b.omega;b.normalImpulse=b.frictionImpulse=b.springImpulse=b.jointImpulse=b.ropeImpulse=b.externalImpulse={};b.torqueImpulse=0;}
+  for(size_t i=0;i<bodies.size();++i){auto& b=bodies[i];beforeVelocity[i]=b.v;beforeOmega[i]=b.omega;b.normalImpulse=b.frictionImpulse=b.springImpulse=b.jointImpulse=b.ropeImpulse=b.externalImpulse={};b.torqueImpulse=0;b.forceSamples.clear();}
   double maxDt=H/8;
   // Travel limits only for potentially intersecting swept bounds, so isolated
   // free-falling bodies do not force excessive substeps for an unrelated wall.
@@ -72,13 +81,16 @@ int engine_tick(int drag,double x,double y){
       if(l.damping>0)maxDt=std::min(maxDt,.5/(l.damping*inv));
     }
   }
-  int sub=(int)std::ceil(H/maxDt);if(sub>256){valid=false;return 3;}
+  // Check the floating-point count before conversion: extreme valid input
+  // can exceed int range and otherwise trap inside WebAssembly.
+  double required=std::ceil(H/maxDt);if(!std::isfinite(required)||required>256){valid=false;return 3;}
+  int sub=static_cast<int>(required);
   double dt=H/sub;
   for(int s=0;s<sub;++s){double t=tick*H+(s+1)*dt;for(size_t i=0;i<bodies.size();++i)if(driven[i]){auto px=paths[i][0].at(t),py=paths[i][1].at(t),pa=paths[i][2].at(t);bodies[i].p={px.v,py.v};bodies[i].v={px.d,py.d};bodies[i].angle=pa.v;bodies[i].omega=pa.d;}
    step(bodies,links,forces,gravity,dt,drag,{x,y});
   }
   for(const auto& b:bodies)for(double v:{b.p.x,b.p.y,b.v.x,b.v.y,b.angle,b.omega})if(!bounded(v)){valid=false;return 4;}
-  for(size_t i=0;i<bodies.size();++i){const auto& b=bodies[i];V acc=(b.v-beforeVelocity[i])*(1/H),fg=(gravityVectors[i]+V{0,gravity})*b.mass,n=b.normalImpulse*(1/H),f=b.frictionImpulse*(1/H),s=b.springImpulse*(1/H),r=b.jointImpulse*(1/H),t=b.ropeImpulse*(1/H),net=acc*b.mass,weight=(n+s+r+t)*(-1);double values[]={acc.x,acc.y,fg.x,fg.y,n.x,n.y,f.x,f.y,s.x,s.y,r.x,r.y,t.x,t.y,net.x,net.y,weight.x,weight.y,b.torqueImpulse/H,(b.omega-beforeOmega[i])/H};std::copy(values,values+20,observables+i*20);}
+  for(size_t i=0;i<bodies.size();++i){const auto& b=bodies[i];V acc=(b.v-beforeVelocity[i])*(1/H),fg=(gravityVectors[i]+V{0,gravity})*b.mass,n=b.normalImpulse*(1/H),f=b.frictionImpulse*(1/H),s=b.springImpulse*(1/H),r=b.jointImpulse*(1/H),t=b.ropeImpulse*(1/H),net=acc*b.mass,weight=(n+f+s+r+t)*(-1);double values[]={acc.x,acc.y,fg.x,fg.y,n.x,n.y,f.x,f.y,s.x,s.y,r.x,r.y,t.x,t.y,net.x,net.y,weight.x,weight.y,b.torqueImpulse/H,(b.omega-beforeOmega[i])/H};std::copy(values,values+20,observables+i*20);}
   ++tick;record();return 0;
  }catch(...){valid=false;return 2;}
 }

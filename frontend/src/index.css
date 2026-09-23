@@ -4,7 +4,7 @@
   color: #202020;
   background: #fff;
   font-synthesis: none;
-  font-size: 13px;
+  font-size: 18px;
   font-weight: 400;
   -webkit-font-smoothing: antialiased;
   color-scheme: light;
@@ -51,7 +51,7 @@ input {
   border-radius: 3px;
 }
 small {
-  font-size: 11px;
+  font-size: 16px;
 }
 h2,
 p {
