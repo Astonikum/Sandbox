@@ -415,6 +415,33 @@ assert.ok(labels.includes("F"));
 assert.ok(!labels.includes("Fтр"));
 console.log("PASS manual vectors remain visible; derived vectors require simulation or explicit toggle");
 
+const repeated = make('rect', 'repeated');
+repeated.derived = Array(20).fill(0);
+repeated.derived[1] = 9.810000001;
+repeated.derived[3] = 9.81;
+repeated.derived[15] = 9.81;
+const gravityEffect = make('acceleration', 'gravity-effect');
+gravityEffect.scope = 'all'; gravityEffect.gravity = true; gravityEffect.vector = { x: 0, y: 9.81 };
+labels.length = 0;
+paint(canvas, { version: 2, items: [repeated, gravityEffect] }, { x: 0, y: 0, scale: 90 }, null, false, true);
+assert.ok(labels.includes('g'));
+assert.ok(labels.includes('Fтяж'));
+assert.ok(!labels.includes('a'), 'matching body acceleration is already shown as gravity');
+assert.ok(!labels.includes('FΣ'), 'resultant force stays in the variable list');
+repeated.derived[1] = 8;
+repeated.derived[15] = 8;
+labels.length = 0;
+paint(canvas, { version: 2, items: [repeated, gravityEffect] }, { x: 0, y: 0, scale: 90 }, null, false, true);
+assert.ok(labels.includes('a') && !labels.includes('FΣ'), 'resultant force is not drawn even when distinct');
+const forceEffect = make('force', 'force-effect');
+forceEffect.scope = 'selection'; forceEffect.targets = [repeated.id]; forceEffect.vector = { x: 5, y: 0 };
+repeated.derived[14] = 5; repeated.derived[15] = 0;
+labels.length = 0;
+paint(canvas, { version: 2, items: [repeated, forceEffect] }, { x: 0, y: 0, scale: 90 }, null, false, true);
+assert.ok(labels.includes('F'));
+assert.ok(!labels.includes('FΣ'), 'matching resultant is already shown as applied force');
+console.log('PASS duplicate acceleration is suppressed and resultant force is omitted');
+
 // Capture shaft origins without changing the renderer's physical geometry.
 const origins = [];
 const positionsContext = new Proxy({}, {
@@ -470,6 +497,27 @@ for (const scale of [30,90,300]) {
   assert.ok(edgeGap<=6.001,'caption remains adjacent at every zoom');
 }
 console.log('PASS force captions stay beside arrow tips in crowded scenes at all zoom levels');
+
+const bodyCaptions = [], rotations = [];
+let textRotation = 0;
+const bodyCaptionContext = new Proxy({}, {
+  get: (_, key) => key === 'measureText' ? () => ({width:.1}) :
+    key === 'save' ? () => { rotations.push(textRotation); } :
+    key === 'restore' ? () => { textRotation = rotations.pop(); } :
+    key === 'rotate' ? angle => { textRotation += angle; } :
+    key === 'fillText' ? (name,x,y) => { if (name === 'm') bodyCaptions.push({x,y,rotation:textRotation}); } : () => {},
+  set: () => true,
+});
+const leftBody = make('rect','label-left',0,0), rightBody = make('rect','label-right',1.25,0);
+leftBody.angle = Math.PI / 3;
+rightBody.angle = -Math.PI / 4;
+paint({...canvas,getContext:()=>bodyCaptionContext},{version:2,items:[leftBody,rightBody]},
+  {x:0,y:0,scale:90},null,false,false);
+assert.equal(bodyCaptions.length,2);
+assert.ok(bodyCaptions.every(p => Math.abs(p.rotation) < 1e-12),'body captions stay horizontal after rotation');
+assert.ok(Math.abs(bodyCaptions[0].x-bodyCaptions[1].x) > .2 || Math.abs(bodyCaptions[0].y-bodyCaptions[1].y) > 20/90,
+  'nearby body captions do not overlap');
+console.log('PASS body captions stay horizontal and separate on nearby rotated bodies');
 
 // Shared/unassigned acceleration gets one world marker; single-body stays local.
 const fieldBodyA = make('rect','field-a',1,1), fieldBodyB = make('rect','field-b',2,1);

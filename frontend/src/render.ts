@@ -180,19 +180,58 @@ export function paint(
     text(id, { x: p.x + dx, y: p.y + 4 / z }, 10);
   };
   type Bounds = { x: number; y: number; w: number; h: number };
-  const occupied: Bounds[] = scene.items.filter(geo).map((o) => {
+  const geometryBounds = new Map(scene.items.filter(geo).map((o) => {
     const points = ["spring", "rope"].includes(o.kind)
       ? [endAt(o, 0, scene.items), endAt(o, 1, scene.items)]
       : [{ x: -o.w / 2, y: -o.h / 2 }, { x: o.w / 2, y: -o.h / 2 },
          { x: -o.w / 2, y: o.h / 2 }, { x: o.w / 2, y: o.h / 2 }].map(p => world(o, p));
     const xs = points.map(p => p.x), ys = points.map(p => p.y);
-    return { x: Math.min(...xs) - 6 / z, y: Math.min(...ys) - 6 / z,
+    return [o.id, { x: Math.min(...xs) - 6 / z, y: Math.min(...ys) - 6 / z,
       w: Math.max(...xs) - Math.min(...xs) + 12 / z,
-      h: Math.max(...ys) - Math.min(...ys) + 12 / z };
-  });
+      h: Math.max(...ys) - Math.min(...ys) + 12 / z }] as const;
+  }));
+  const occupied: Bounds[] = [...geometryBounds.values()];
+  if (selected && !running && !chosenTargets.length) {
+    const selectedItem = scene.items.find(o => o.id === selected);
+    if (selectedItem && geo(selectedItem)) {
+      const turn = rotationHandle(selectedItem, z);
+      if (turn) occupied.push({ x: turn.x - 17 / z, y: turn.y - 17 / z, w: 34 / z, h: 34 / z });
+    }
+  }
   const overlap = (a: Bounds, b: Bounds) =>
     Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x)) *
     Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y));
+  const labelWidth = (name: string, id: string) => {
+    c.font = `italic ${15 / z}px Georgia`;
+    const nameWidth = c.measureText(name).width;
+    c.font = `italic ${10 / z}px Georgia`;
+    return nameWidth + c.measureText(id).width;
+  };
+  const placeLabel = (name: string, id: string, candidates: Vec[], exclude?: Bounds) => {
+    const w = labelWidth(name, id);
+    let best = candidates[0], bestScore = Infinity;
+    for (const p of candidates) {
+      const box = { x: p.x, y: p.y - 15 / z, w, h: 20 / z };
+      const score = occupied.reduce((sum, other) => sum + (other === exclude ? 0 : overlap(box, other)), 0);
+      if (score < bestScore) { best = p; bestScore = score; }
+      if (score === 0) break;
+    }
+    label(name, id, best);
+    occupied.push({ x: best.x, y: best.y - 15 / z, w, h: 20 / z });
+  };
+  const beside = (box: Bounds, name: string, id: string): Vec[] => {
+    const w = labelWidth(name, id), midX = box.x + box.w / 2, midY = box.y + box.h / 2;
+    return [
+      { x: box.x + box.w + 4 / z, y: midY + 5 / z },
+      { x: box.x - w - 4 / z, y: midY + 5 / z },
+      { x: midX - w / 2, y: box.y - 5 / z },
+      { x: midX - w / 2, y: box.y + box.h + 20 / z },
+      { x: box.x + box.w + 4 / z, y: box.y + 5 / z },
+      { x: box.x - w - 4 / z, y: box.y + 5 / z },
+    ];
+  };
+  const sameVector = (a: Vec, b: Vec) =>
+    Math.hypot(a.x - b.x, a.y - b.y) <= 1e-7 * Math.max(1, Math.hypot(a.x, a.y), Math.hypot(b.x, b.y));
   const accelerations: { origin: Vec; v: Vec; name: string; id: string }[] = [];
   const previousOffsets = vectorOffsets.get(canvas);
   const nextOffsets = new Map<string, Vec>();
@@ -249,20 +288,15 @@ export function paint(
     c.fillStyle = "#111";
     c.fill();
     c.restore();
-    // Choose a side of the tip; never push a caption away from its vector.
-    c.font = `italic ${15 / z}px Georgia`;
-    const nameWidth = c.measureText(name).width;
-    c.font = `italic ${10 / z}px Georgia`;
-    const captionWidth = nameWidth + c.measureText(id).width;
-    let bestCaption = { x: end.x + 6 / z, y: end.y - 6 / z }, captionScore = Infinity;
-    for (const x of [end.x + 6 / z, end.x - captionWidth - 6 / z])
-      for (const y of [end.y - 6 / z, end.y + 16 / z]) {
-        const box = { x, y: y - 15 / z, w: captionWidth, h: 20 / z };
-        const score = occupied.reduce((sum, other) => sum + overlap(box, other), 0);
-        if (score < captionScore) { captionScore = score; bestCaption = { x, y }; }
-      }
-    label(name, id, bestCaption);
-    occupied.push({ x: bestCaption.x, y: bestCaption.y - 15 / z, w: captionWidth, h: 20 / z });
+    const captionWidth = labelWidth(name, id);
+    placeLabel(name, id, [
+      { x: end.x + 6 / z, y: end.y - 6 / z },
+      { x: end.x + 6 / z, y: end.y + 16 / z },
+      { x: end.x - captionWidth - 6 / z, y: end.y - 6 / z },
+      { x: end.x - captionWidth - 6 / z, y: end.y + 16 / z },
+      { x: end.x + 6 / z, y: end.y - 20 / z },
+      { x: end.x - captionWidth - 6 / z, y: end.y - 20 / z },
+    ]);
     c.restore();
   };
   if (grid) {
@@ -336,11 +370,10 @@ export function paint(
           c.restore();
         }
       }
-      label(o.kind === "surface" ? "s" : o.kind === "rod" ? "l" : "m", indexLabel(o), {
-        x: o.w / 2 + 10 / z,
-        y: 3 / z,
-      });
       c.restore();
+      const name = o.kind === "surface" ? "s" : o.kind === "rod" ? "l" : "m";
+      const box = geometryBounds.get(o.id)!;
+      placeLabel(name, indexLabel(o), beside(box, name, indexLabel(o)));
     } else if (o.kind === "bearing") {
       const p = center(o, scene.items);
       dot(p, o.w / 2);
@@ -390,10 +423,15 @@ export function paint(
       }
       dot(a, 2.5 / z);
       dot(b, 2.5 / z);
-      label(o.kind === "spring" ? "k" : "l", indexLabel(o), {
-        x: (a.x + b.x) / 2 + 10 / z,
-        y: (a.y + b.y) / 2 - 9 / z,
-      });
+      const name = o.kind === "spring" ? "k" : "l", id = indexLabel(o);
+      const midpoint = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      const nx = len ? -dy / len : 0, ny = len ? dx / len : -1;
+      const w = labelWidth(name, id);
+      placeLabel(name, id, [
+        { x: midpoint.x + nx * 16 / z - w / 2, y: midpoint.y + ny * 16 / z + 5 / z },
+        { x: midpoint.x - nx * 16 / z - w / 2, y: midpoint.y - ny * 16 / z + 5 / z },
+        ...beside(geometryBounds.get(o.id)!, name, id),
+      ], geometryBounds.get(o.id));
     }
     if (o.id === selected || chosenTargets.includes(o.id) || o.id === hover) {
       c.save();
@@ -460,8 +498,9 @@ export function paint(
       arrow(b, { x: b.vx, y: b.vy }, "v", indexLabel(b));
     if (b.derived) {
       const d = b.derived;
-      arrow(b, { x: d[2], y: d[3] }, "Fтяж", indexLabel(b));
-      arrow(b, { x: d[14], y: d[15] }, "FΣ", indexLabel(b));
+      const gravityForce = { x: d[2], y: d[3] };
+      const applied = scene.items.filter(effect).filter(e => targets(e, [b]).length);
+      arrow(b, gravityForce, "Fтяж", indexLabel(b));
       const names = ["", "N", "Fтр", "Fупр", "R", "T"];
       for (const f of b.forceSamples || []) {
         // The load on a fixed surface is already shown as P from its body.
@@ -481,7 +520,9 @@ export function paint(
       }
       for (const f of supports.values())
         arrow(world(b, f.point), f.vector, "P", indexLabel(b));
-      accelerations.push({ origin: b, v: { x: d[0], y: d[1] }, name: "a", id: indexLabel(b) });
+      const acceleration = { x: d[0], y: d[1] };
+      if (!applied.some(e => e.kind === "acceleration" && sameVector(e.vector, acceleration)))
+        accelerations.push({ origin: b, v: acceleration, name: "a", id: indexLabel(b) });
     } else {
       let x = 0,
         y = 0;

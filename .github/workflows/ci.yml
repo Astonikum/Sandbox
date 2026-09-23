@@ -34,8 +34,10 @@ jobs:
           trap 'docker logs sandbox-ci; docker rm -f sandbox-ci' EXIT
           curl --fail --retry 10 --retry-all-errors --retry-delay 1 --max-time 5 http://localhost:8080/ -o /tmp/index.html
           grep -q '<div id="root">' /tmp/index.html
-          curl --fail http://localhost:8080/engine/physics.mjs -o /tmp/physics.mjs
-          curl --fail http://localhost:8080/engine/physics.wasm -o /tmp/physics.wasm
+          curl --fail --dump-header /tmp/physics.headers http://localhost:8080/engine/physics.mjs -o /tmp/physics.mjs
+          grep -qi '^content-type: application/javascript' /tmp/physics.headers
+          curl --fail --dump-header /tmp/wasm.headers http://localhost:8080/engine/physics.wasm -o /tmp/physics.wasm
+          grep -qi '^content-type: application/wasm' /tmp/wasm.headers
           test "$(od -An -tx1 -N4 /tmp/physics.wasm | tr -d ' \n')" = 0061736d
       - name: Check version tag format
         if: startsWith(github.ref, 'refs/tags/v')

@@ -2,6 +2,7 @@ import { body, effect, targets } from "./model";
 import type { BodyItem, Scene, Patch, Effect } from "./model";
 import { linksFor } from "./physics";
 import { FixedClock, STEP } from "./wasm-api";
+import { convertUnit, fields as variableFields, readField, writeField, valueAt } from './variables';
 import type { WasmEngine } from "./wasm-api";
 let engine: WasmEngine,
   scene: Scene,
@@ -99,6 +100,11 @@ function edit(id: string, patch: Patch) {
   const o = scene.items.find((o) => o.id === id);
   if (!o) return;
   Object.assign(o, patch);
+  for (const field of variableFields(o)) {
+    const variableId = scene.bindings?.[`${id}:${field.key}`];
+    const variable = scene.variables?.find(v => v.id === variableId);
+    if (variable && !field.computed) variable.value = convertUnit(readField(o, field.key), field.unit, variable.unit);
+  }
   if (body(o)) {
     const i = bodies.indexOf(o);
     for (const [key, v] of Object.entries(patch))
@@ -119,11 +125,57 @@ function edit(id: string, patch: Patch) {
           ),
         );
 }
+function applyGraphs(time: number) {
+  const variables = scene.variables;
+  if (!variables?.some(v => v.graph)) return;
+  check(engine._engine_sample(time));
+  const output = engine.HEAPF64.subarray(engine._engine_output() / 8, engine._engine_output() / 8 + bodies.length * 6);
+  const observables = engine.HEAPF64.subarray(engine._engine_observables() / 8, engine._engine_observables() / 8 + bodies.length * 20);
+  const value = (id: string, seen = new Set<string>()): number => {
+    const v = variables.find(v => v.id === id);
+    if (!v) throw Error('Отсутствует переменная графика');
+    if (seen.has(id)) throw Error('Цикл зависимостей графиков');
+    if (v.graph) { seen.add(id); return valueAt(v.graph.points, v.graph.source === 'time' ? time : value(v.graph.source, seen)); }
+    if (v.derived) {
+      const index = bodies.findIndex(b => b.id === v.derived!.itemId);
+      if (index < 0) return 0;
+      const field = variableFields(bodies[index]).find(f => f.key === `derived.${v.derived!.index}`)!;
+      return convertUnit(observables[index * 20 + v.derived.index], field.unit, v.unit);
+    }
+    const binding = Object.entries(scene.bindings || {}).find(([, bound]) => bound === id);
+    if (binding) {
+      const [itemId, key] = binding[0].split(':');
+      const index = bodies.findIndex(b => b.id === itemId);
+      const offset: Record<string, number> = { x: 0, y: 1, angle: 2, vx: 3, vy: 4, omega: 5 };
+      if (index >= 0) {
+        const field = variableFields(bodies[index]).find(f => f.key === key);
+        if (field && key in offset) return convertUnit(output[index * 6 + offset[key]], field.unit, v.unit);
+        if (field && key.startsWith('velocity.')) return convertUnit(readField({ ...bodies[index], vx: output[index * 6 + 3], vy: output[index * 6 + 4] }, key), field.unit, v.unit);
+      }
+    }
+    return v.value;
+  };
+  for (const v of variables) {
+    if (!v.graph) continue;
+    const next = value(v.id);
+    if (!Number.isFinite(next) || Math.abs(next) > 1e5) throw Error(`График ${v.symbol}: значение вне диапазона`);
+    if (next === v.value) continue;
+    v.value = next;
+    for (const [binding, id] of Object.entries(scene.bindings || {})) {
+      if (id !== v.id) continue;
+      const [itemId, key] = binding.split(':');
+      const o = scene.items.find(o => o.id === itemId);
+      if (!o) continue;
+      const field = variableFields(o).find(f => f.key === key);
+      const physical = field ? convertUnit(next, v.unit, field.unit) : next;
+      if (field && (physical < (field.min ?? -1e5) || physical > (field.max ?? 1e5))) throw Error(`График ${v.symbol}: значение не подходит свойству`);
+      const updated = writeField(o, key, physical);
+      edit(itemId, effect(updated) ? { vector: updated.vector } : key.startsWith('velocity.') && body(updated) ? { vx: updated.vx, vy: updated.vy } : { [key]: physical });
+    }
+  }
+}
 async function initialize(s: Scene, mode: string) {
-  const url = new URL(
-    "engine/physics.mjs",
-    self.location.origin + import.meta.env.BASE_URL,
-  ).href;
+  const url = new URL(/* @vite-ignore */ "../engine/physics.mjs", import.meta.url).href;
   const module = await import(/* @vite-ignore */ url);
   engine = await module.default();
   scene = s;
@@ -188,6 +240,7 @@ async function initialize(s: Scene, mode: string) {
   });
   for (const o of s.items) if (effect(o) && o.kind === "velocity") velocity(o);
   effects();
+  applyGraphs(0);
   if (mode === "preview") {
     // Probe one fixed step on this isolated worker. The editor retains its
     // original geometry, parameters, history and simulation clock.
@@ -199,7 +252,7 @@ async function initialize(s: Scene, mode: string) {
       engine._engine_observables() / 8 + bodies.length * 20);
     postMessage({ type: "ready" });
     postMessage({ type: "frame", state, rendered: state, derived, forceSamples: forceSamples(),
-      time: 0, cost: 0, dropped: 0, settled: true, residual: 0 },
+      time: 0, cost: 0, dropped: 0, settled: true, residual: 0, variableValues: scene.variables?.map(v => v.value) },
       { transfer: [state.buffer, derived.buffer] });
     return;
   }
@@ -215,7 +268,6 @@ self.onmessage = async ({ data }) => {
     const began = performance.now();
     for (const e of data.edits as { id: string; patch: Patch }[])
       edit(e.id, e.patch);
-    effects();
     const count = staticMode
         ? Math.min(32, 12000 - staticSteps)
         : clock.consume(data.elapsed),
@@ -223,6 +275,8 @@ self.onmessage = async ({ data }) => {
     let residual = 0,
       settled = false;
     for (let i = 0; i < count; i++) {
+      applyGraphs(engine._engine_time());
+      effects();
       check(engine._engine_tick(drag, data.drag?.x || 0, data.drag?.y || 0));
       if (staticMode) {
         residual = engine._engine_relax();
@@ -266,6 +320,7 @@ self.onmessage = async ({ data }) => {
         dropped: clock.dropped,
         settled,
         residual,
+        variableValues: scene.variables?.map(v => v.value),
       },
       { transfer: [rendered.buffer, state.buffer, derived.buffer] },
     );

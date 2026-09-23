@@ -9,6 +9,8 @@ COPY frontend /app/frontend
 RUN npm test && npm run lint && npm run build
 
 FROM nginx:1.28-alpine AS runtime
+RUN sed -i 's@application/javascript[[:space:]]*js;@application/javascript js mjs;@' /etc/nginx/mime.types \
+    && grep -q 'application/javascript js mjs;' /etc/nginx/mime.types
 COPY --from=build /app/frontend/dist /usr/share/nginx/html
 EXPOSE 80
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s \

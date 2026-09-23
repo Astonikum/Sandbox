@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
+import { useCombobox } from "downshift";
 import type { PointerEvent as PE, ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { FolderOpenIcon } from "@phosphor-icons/react/dist/csr/FolderOpen";
 import { DownloadSimpleIcon } from "@phosphor-icons/react/dist/csr/DownloadSimple";
 import { ArrowCounterClockwiseIcon } from "@phosphor-icons/react/dist/csr/ArrowCounterClockwise";
@@ -14,6 +16,10 @@ import { TrashIcon } from "@phosphor-icons/react/dist/csr/Trash";
 import { FileIcon } from "@phosphor-icons/react/dist/csr/File";
 import { CheckIcon } from "@phosphor-icons/react/dist/csr/Check";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
+import { EyeIcon } from "@phosphor-icons/react/dist/csr/Eye";
+import { EyeSlashIcon } from "@phosphor-icons/react/dist/csr/EyeSlash";
+import { DotsThreeIcon } from "@phosphor-icons/react/dist/csr/DotsThree";
+import { PlusIcon } from "@phosphor-icons/react/dist/csr/Plus";
 import { LockSimpleIcon } from "@phosphor-icons/react/dist/csr/LockSimple";
 import { CircleNotchIcon } from "@phosphor-icons/react/dist/csr/CircleNotch";
 import {
@@ -43,15 +49,17 @@ import type {
   Patch,
   Geometry,
   Vec,
-  BodyItem,
 } from "./model";
 import { Simulation } from "./simulation";
 import type { Metrics } from "./simulation";
 import { paint, fit, fromScreen, hit, handles, resized, rotationHandle, rotated } from "./render";
 import type { Camera } from "./render";
 import { ComponentIcon } from "./ComponentIcon";
+import { allowedUnits, bindableVariables, bindVariable, bindingKey, convertUnit, derivedFields, displayUnit, displayValue, ensureVariables, fields, knownUnit, readField, removeVariable, saveVariable, setVariable, syncVariables, unitChoices } from './variables';
+import type { Variable } from './variables';
+import { GraphEditor } from './GraphEditor';
 import "./App.css";
-const format = (n: number) => Number(n.toFixed(4)).toString();
+const format = (n: number) => Number(n.toPrecision(6)).toString();
 function Tool({
   label,
   children,
@@ -80,127 +88,74 @@ function Tool({
     </button>
   );
 }
-function Num({
-  label,
-  value,
-  unit = "",
-  min = -1e5,
-  max = 1e5,
-  disabled = false,
-  onChange,
-}: {
-  label: string;
-  value: number;
-  unit?: string;
-  min?: number;
-  max?: number;
-  disabled?: boolean;
-  onChange: (n: number) => void;
-}) {
-  const [draft, setDraft] = useState(format(value)),
-    [bad, setBad] = useState(false),
-    focused = useRef(false);
-  useEffect(() => {
-    if (!focused.current) {
-      setDraft(format(value));
-      setBad(false);
-    }
-  }, [value]);
-  return (
-    <label className={"number " + (bad ? "invalid" : "")}>
-      <span>{label}</span>
-      <div>
-        <input
-          aria-label={label}
-          aria-invalid={bad}
-          title={bad ? `Число от ${min} до ${max}` : undefined}
-          value={draft}
-          inputMode="decimal"
-          readOnly={disabled}
-          onFocus={() => {
-            focused.current = true;
-          }}
-          onChange={(e) => {
-            setDraft(e.target.value);
-            setBad(false);
-          }}
-          onBlur={() => {
-            focused.current = false;
-            const n = Number(draft.replace(",", "."));
-            if (!draft.trim() || !Number.isFinite(n) || n < min || n > max) {
-              setBad(true);
-              return;
-            }
-            if (n !== value) onChange(n);
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") e.currentTarget.blur();
-            if (e.key === "Escape") {
-              setDraft(format(value));
-              setBad(false);
-              focused.current = false;
-            }
-          }}
-        />
-        <small>{unit}</small>
-      </div>
-    </label>
-  );
+function InlineNumber({ label, value, disabled, onChange }: { label: string; value: number; disabled?: boolean; onChange: (value: number) => void }) {
+  const [draft, setDraft] = useState(format(value));
+  const [bad, setBad] = useState(false);
+  const focused = useRef(false);
+  useEffect(() => { if (!focused.current) { setDraft(format(value)); setBad(false); } }, [value]);
+  return <input className={bad ? 'invalid' : ''} aria-label={label} aria-invalid={bad} value={draft} readOnly={disabled} inputMode="decimal"
+    onFocus={() => { focused.current = true; }} onChange={e => { setDraft(e.target.value); setBad(false); }}
+    onBlur={() => { focused.current = false; const n = Number(draft.replace(',', '.')); if (!draft.trim() || !Number.isFinite(n)) { setBad(true); return; } if (n !== value) onChange(n); }}
+    onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') { setDraft(format(value)); setBad(false); e.currentTarget.blur(); } }} />;
 }
-function VectorFields({
-  label,
-  value,
-  unit,
-  onChange,
-  disabled = false,
-}: {
-  label: string;
-  value: Vec;
-  unit: string;
-  onChange: (v: Vec) => void;
-  disabled?: boolean;
-}) {
-  const magnitude = Math.hypot(value.x, value.y);
-  const [zeroAngle, setZeroAngle] = useState(0);
-  const angle = magnitude > 0 ? Math.atan2(-value.y, value.x) * 180 / Math.PI : zeroAngle;
-  const setPolar = (length: number, degrees: number) => {
-    setZeroAngle(degrees);
-    const radians = degrees * Math.PI / 180;
-    onChange({ x: length * Math.cos(radians), y: -length * Math.sin(radians) });
-  };
-  return (
-    <div className="vector-fields">
-      <Num label={`|${label}|`} value={magnitude} min={0} unit={unit}
-        disabled={disabled} onChange={(n) => setPolar(n, angle)} />
-      <div className="pair">
-        <Num label={`${label}: угол к X`} value={angle} unit="°"
-          disabled={disabled} onChange={(n) => setPolar(magnitude, n)} />
-        <Num label={`${label}: угол к Y`} value={angle + 90} unit="°"
-          disabled={disabled} onChange={(n) => setPolar(magnitude, n - 90)} />
-      </div>
-      <details>
-        <summary>Проекции X/Y</summary>
-        <div className="pair">
-          <Num label={`${label}ₓ`} value={value.x} unit={unit} disabled onChange={() => {}} />
-          <Num label={`${label}ᵧ`} value={value.y} unit={unit} disabled onChange={() => {}} />
-        </div>
-        <small>X = |{label}| cos α; Y = −|{label}| sin α</small>
-      </details>
+function Symbol({ value }: { value: string }) { return <span className="symbol">{value[0]}<sub>{value.slice(1)}</sub></span>; }
+function UnitSelect({ variable, onChange }: { variable: Variable; onChange: (unit: string) => void }) {
+  const options = unitChoices(variable.unit);
+  return options.length > 1 ? <select className="unit-select" aria-label={`Единица ${variable.symbol}`} title="Единица измерения" value={displayUnit(variable)} onChange={e => onChange(e.target.value)}>{options.map(unit => <option key={unit} value={unit}>{unit}</option>)}</select> : <small className="unit-static">{variable.unit}</small>;
+}
+function UnitCombobox({ value, onChange }: { value: string; onChange: (unit: string) => void }) {
+  const search = value.replace(/[HhNn]/g, 'Н');
+  const items = allowedUnits.filter(unit => unit.startsWith(search));
+  const { isOpen, highlightedIndex, getLabelProps, getInputProps, getToggleButtonProps, getMenuProps, getItemProps } = useCombobox({
+    items, inputValue: value, itemToString: item => item ?? '',
+    onInputValueChange: ({ inputValue }) => onChange(inputValue ?? ''),
+    onSelectedItemChange: ({ selectedItem }) => onChange(selectedItem ?? ''),
+  });
+  return <div className="unit-entry">
+    <label {...getLabelProps()}>Единица измерения</label>
+    <div className="unit-combobox">
+      <div className="unit-combobox-input"><input {...getInputProps({ 'aria-label': 'Единица измерения', maxLength: 30, placeholder: 'Без единицы' })} /><button type="button" aria-label="Показать единицы" {...getToggleButtonProps()}>⌄</button></div>
+      <ul {...getMenuProps()} className={`unit-options ${isOpen ? '' : 'hidden'}`}>{isOpen && items.map((unit, index) => <li key={unit || 'none'} {...getItemProps({ item: unit, index })} className={highlightedIndex === index ? 'highlighted' : ''}>{unit || 'Без единицы'}</li>)}</ul>
     </div>
-  );
+  </div>;
 }
-
-const observed = [
-  ["Ускорение a", 0, "м/с²"],
-  ["Сила тяжести Fтяж", 2, "Н"],
-  ["Реакция контакта N", 4, "Н"],
-  ["Трение Fтр", 6, "Н"],
-  ["Упругость Fупр", 8, "Н"],
-  ["Реакция крепления R", 10, "Н"],
-  ["Натяжение T", 12, "Н"],
-  ["Результирующая F", 14, "Н"],
-  ["Вес P", 16, "Н"],
-] as const;
+function newSymbol(variables: Variable[] = []) { let n = 1; while (variables.some(v => v.symbol === `q${n}`)) n++; return `q${n}`; }
+function VariableEditor({ variable, suggestedSymbol, onSave, onClose }: { variable?: Variable; suggestedSymbol: string; onSave: (draft: { symbol: string; value: number; unit: string }) => string | null; onClose: () => void }) {
+  const [symbol, setSymbol] = useState(variable?.symbol ?? suggestedSymbol);
+  const [value, setValue] = useState(String(variable ? displayValue(variable) : 0));
+  const [unit, setUnit] = useState(variable ? displayUnit(variable) : '');
+  const [error, setError] = useState('');
+  return <div className="editor-backdrop" role="presentation" onClick={onClose}><form className="variable-editor" role="dialog" aria-modal="true" aria-label={variable ? `Изменить ${variable.symbol}` : 'Новая переменная'} onClick={e => e.stopPropagation()} onSubmit={e => {
+    e.preventDefault();
+    const n = Number(value.replace(',', '.'));
+    if (!value.trim() || !Number.isFinite(n)) { setError('Введите числовое значение'); return; }
+    if (!knownUnit(unit) && unit !== (variable && displayUnit(variable))) { setError('Выберите единицу из списка'); return; }
+    const error = onSave({ symbol, value: n, unit });
+    if (error) setError(error); else onClose();
+  }}>
+    <h3>{variable ? `Переменная ${variable.symbol}` : 'Новая переменная'}</h3>
+    <label>Литера <input aria-label="Литера" value={symbol} maxLength={40} onChange={e => setSymbol(e.target.value)} autoFocus /></label>
+    <label>Значение <input aria-label="Значение" value={value} inputMode="decimal" onChange={e => setValue(e.target.value)} /></label>
+    <UnitCombobox value={unit} onChange={next => { setUnit(next); setError(''); }} />
+    {error && <p className="range-error">{error}</p>}
+    <div className="range-actions"><button type="button" onClick={onClose}>Отмена</button><button type="submit" className="primary">Сохранить</button></div>
+  </form></div>;
+}
+function RangeEditor({ variable, onSave, onRemove, onClose }: { variable: Variable; onSave: (range: NonNullable<Variable['range']>) => void; onRemove: () => void; onClose: () => void }) {
+  const unit = displayUnit(variable), toShown = (n: number) => convertUnit(n, variable.unit, unit), toStored = (n: number) => convertUnit(n, unit, variable.unit);
+  const [min, setMin] = useState(toShown(variable.range?.min ?? Math.min(0, variable.value)));
+  const [max, setMax] = useState(toShown(variable.range?.max ?? Math.max(10, variable.value + 1)));
+  const [step, setStep] = useState(toShown(variable.range?.step ?? .1));
+  const [error, setError] = useState('');
+  return <div className="editor-backdrop" role="presentation" onClick={onClose}><div className="range-editor" role="dialog" aria-modal="true" aria-label={`Диапазон ${variable.symbol}`} onClick={e => e.stopPropagation()}>
+    <h3>Диапазон {variable.symbol} {unit}</h3>
+    <label>От <input type="number" value={min} onChange={e => setMin(Number(e.target.value))} /></label>
+    <label>До <input type="number" value={max} onChange={e => setMax(Number(e.target.value))} /></label>
+    <label>Шаг <input type="number" value={step} onChange={e => setStep(Number(e.target.value))} /></label>
+    {error && <p className="range-error">{error}</p>}
+    <div className="range-actions">{variable.range && <button onClick={onRemove}>Убрать range</button>}<button onClick={onClose}>Отмена</button><button className="primary" onClick={() => { const range = { min: toStored(min), max: toStored(max), step: toStored(step) }; if (!Number.isFinite(min) || !Number.isFinite(max) || !Number.isFinite(step) || range.min >= range.max || range.step <= 0 || range.min < -1e5 || range.max > 1e5) { setError('Укажите корректные границы и положительный шаг'); return; } onSave(range); }}>Сохранить</button></div>
+  </div></div>;
+}
 type Pending = {
   kind: EffectKind;
   scope: "selection" | "current" | "all";
@@ -208,7 +163,7 @@ type Pending = {
   editing?: string;
 };
 export default function App() {
-  const [scene, setScene] = useState<Scene>(() => structuredClone(initial)),
+  const [scene, setScene] = useState<Scene>(() => ensureVariables(structuredClone(initial))),
     [selected, setSelected] = useState<string | null>("2"),
     [grid, setGrid] = useState(true),
     [showAuto, setShowAuto] = useState(false),
@@ -219,7 +174,11 @@ export default function App() {
     [notice, setNotice] = useState<{ text: string; error: boolean } | null>(
       null,
     ),
-    [counts, setCounts] = useState([0, 0]);
+    [counts, setCounts] = useState([0, 0]),
+    [editVariable, setEditVariable] = useState<string | null>(null),
+    [editRange, setEditRange] = useState<string | null>(null),
+    [editGraph, setEditGraph] = useState<string | null>(null),
+    [variableMenu, setVariableMenu] = useState<{ id: string; left: number; top: number } | null>(null);
   const canvas = useRef<HTMLCanvasElement>(null),
     file = useRef<HTMLInputElement>(null),
     current = useRef(scene),
@@ -263,7 +222,7 @@ export default function App() {
     setCounts([past.current.length, 0]);
   };
   const commit = (s: Scene) => {
-    s = numberScene(s);
+    s = ensureVariables(numberScene(s));
     if (!running) remember(current.current);
     update(s);
   };
@@ -281,8 +240,21 @@ export default function App() {
           id,
           10 / camera.current.scale,
         );
+      s = syncVariables(current.current, s);
       validate(s);
-      if (running) simulation.current?.edit(id, patch);
+      if (running) {
+        for (const o of s.items) {
+          const prior = current.current.items.find(p => p.id === o.id);
+          if (!prior) continue;
+          const changed: Patch = {};
+          for (const field of fields(o)) if (readField(o, field.key) !== readField(prior, field.key)) {
+            if (field.key.startsWith('vector.')) changed.vector = (o as Effect).vector;
+            else if (field.key.startsWith('velocity.')) continue;
+            else changed[field.key] = readField(o, field.key);
+          }
+          if (Object.keys(changed).length) simulation.current?.edit(o.id, changed);
+        }
+      }
       commit(s);
     } catch (e) {
       tell(e instanceof Error ? e.message : "Неверные параметры", true);
@@ -320,7 +292,7 @@ export default function App() {
     const runtime = new Simulation(scene, () => null, (calculated) => {
       if (cancelled) return;
       const values = new Map(calculated.items.filter(body).map(b => [b.id, b]));
-      const view = { ...scene, items: scene.items.map(o => {
+      const view = { ...scene, variables: calculated.variables, items: scene.items.map(o => {
         const b = values.get(o.id);
         return body(o) && b ? { ...o, vx: b.vx, vy: b.vy, omega: b.omega, derived: b.derived, forceSamples: b.forceSamples } : o;
       }) };
@@ -462,7 +434,7 @@ export default function App() {
     }
     const id = nextId(current.current.items),
       o = make(kind, id, snap(at.x), snap(at.y));
-    let s: Scene = { version: 2, items: [...current.current.items, o] };
+    let s: Scene = { ...current.current, items: [...current.current.items, o] };
     s = attachScene(s, id, 10 / camera.current.scale);
     commit(s);
     setSelected(id);
@@ -493,7 +465,7 @@ export default function App() {
       targets: pending.scope === "all" ? [] : ids,
     };
     commit({
-      version: 2,
+      ...current.current,
       items: existing
         ? current.current.items.map((i) => (i.id === id ? o : i))
         : [...current.current.items, o],
@@ -637,7 +609,7 @@ export default function App() {
       JSON.stringify(g.before) !== JSON.stringify(current.current)
     ) {
       remember(g.before);
-      update(attachScene(current.current, g.id!, 10 / camera.current.scale));
+      update(syncVariables(g.before, attachScene(current.current, g.id!, 10 / camera.current.scale)));
     }
     gesture.current = null;
     drag.current = null;
@@ -728,8 +700,45 @@ export default function App() {
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
+  const registryChange = (value: Scene | (() => Scene)) => {
+    try {
+      const next = typeof value === 'function' ? value() : value;
+      validate(next);
+      if (running) for (const o of next.items) {
+        const prior = current.current.items.find(p => p.id === o.id);
+        if (!prior) continue;
+        const patch: Patch = {};
+        for (const field of fields(o)) if (readField(o, field.key) !== readField(prior, field.key)) {
+          if (field.key.startsWith('vector.')) patch.vector = (o as Effect).vector;
+          else if (field.key.startsWith('velocity.')) continue;
+          else patch[field.key] = readField(o, field.key);
+        }
+        if (Object.keys(patch).length) simulation.current?.edit(o.id, patch);
+      }
+      commit(next);
+      return true;
+    } catch (e) { tell(e instanceof Error ? e.message : String(e), true); return false; }
+  };
+  const updateVariable = (id: string, patch: Partial<Variable>) => {
+    return registryChange({ ...current.current, variables: current.current.variables?.map(v => v.id === id ? { ...v, ...patch } : v) });
+  };
+  useEffect(() => {
+    if (!variableMenu) return;
+    const close = () => setVariableMenu(null);
+    const key = (e: KeyboardEvent) => { if (e.key === 'Escape') close(); };
+    window.addEventListener('scroll', close, true);
+    window.addEventListener('resize', close);
+    window.addEventListener('keydown', key);
+    return () => {
+      window.removeEventListener('scroll', close, true);
+      window.removeEventListener('resize', close);
+      window.removeEventListener('keydown', key);
+    };
+  }, [variableMenu]);
   const chosen = scene.items.find((o) => o.id === selected),
-    bodies = scene.items.filter(body);
+    observedScene = showAuto && !running && preview?.source === scene ? preview.scene : scene,
+    bodies = scene.items.filter(body),
+    menuVariable = scene.variables?.find(v => v.id === variableMenu?.id);
   const field = (
     key: string,
     label: string,
@@ -737,42 +746,31 @@ export default function App() {
     min = -1e5,
     max = 1e5,
     disabled = false,
-  ) => (
-    <Num
-      key={chosen!.id + key}
-      label={label}
-      value={(chosen as unknown as Record<string, number>)[key]}
-      unit={unit}
-      min={min}
-      max={max}
-      disabled={disabled}
-      onChange={(n) =>
-        change(chosen!.id, {
-          [key]: n,
-          ...(chosen &&
-          geo(chosen) &&
-          ["circle", "pulley", "bearing"].includes(chosen.kind) &&
-          key === "w"
-            ? { h: n }
-            : {}),
-        })
-      }
-    />
-  );
-  const variableVector = (
-    o: BodyItem,
-    label: string,
-    index: number,
-    unit: string,
-  ) => (
-    <VectorFields
-      label={`${label}_${indexLabel(o)}`}
-      value={{ x: o.derived?.[index] || 0, y: o.derived?.[index + 1] || 0 }}
-      unit={unit}
-      disabled
-      onChange={() => {}}
-    />
-  );
+  ) => {
+    const id = scene.bindings?.[bindingKey(chosen!.id, key)];
+    const variable = scene.variables?.find(v => v.id === id);
+    if (!variable) return null;
+    const computed = key.startsWith('derived.');
+    const compatible = bindableVariables(scene, chosen!.id, key);
+    const shown = computed ? observedScene.items.find(o => o.id === chosen!.id) || chosen! : chosen!;
+    return <div className="variable-field" key={chosen!.id + key}>
+      <span className="field-label" title={label}>{label}</span>
+      <span className="variable-select"><Symbol value={variable.symbol} />
+        <select aria-label={`Переменная: ${label}`} title="Выбрать переменную" value={id} disabled={running || computed}
+          onChange={e => registryChange(() => bindVariable(current.current, chosen!.id, key, e.target.value))}>
+          {(computed ? [variable] : compatible).map(v => <option key={v.id} value={v.id}>{v.symbol}</option>)}
+        </select>
+      </span>
+      <button className="visibility-button" title={variable.visible ? 'Скрыть в списке переменных' : 'Показать в списке переменных'} aria-label={`${variable.visible ? 'Скрыть' : 'Показать'} ${variable.symbol}`} aria-pressed={variable.visible} onClick={() => updateVariable(id!, { visible: !variable.visible, visibilityLocked: true })}>{variable.visible ? <EyeIcon /> : <EyeSlashIcon />}</button>
+      <InlineNumber label={label} value={key.endsWith('.angle') && readField(shown, key.replace('.angle', '.magnitude')) === 0 ? displayValue(variable) : convertUnit(readField(shown, key), unit, displayUnit(variable))} disabled={disabled || computed} onChange={n => {
+        const physical = convertUnit(n, displayUnit(variable), unit);
+        if (physical < min || physical > max) { tell(`${label}: число от ${min} до ${max} ${unit}`, true); return; }
+        if (key.startsWith('vector.') || key.startsWith('velocity.') || key === 'vx' || key === 'vy') registryChange(() => setVariable(current.current, id!, convertUnit(n, displayUnit(variable), variable.unit)));
+        else change(chosen!.id, { [key]: physical, ...(geo(chosen!) && ['circle', 'pulley', 'bearing'].includes(chosen!.kind) && key === 'w' ? { h: physical } : {}) });
+      }} />
+      <UnitSelect variable={variable} onChange={unit => updateVariable(id!, { displayUnit: unit })} />
+    </div>;
+  };
   return (
     <div className="app">
       <nav className="toolbar" aria-label="Инструменты">
@@ -1043,24 +1041,12 @@ export default function App() {
                   </div>
                   {effect(chosen) ? (
                     <>
-                      <VectorFields
-                        label={
-                          chosen.kind === "force"
-                            ? "F"
-                            : chosen.kind === "velocity"
-                              ? "v"
-                              : "a"
-                        }
-                        value={chosen.vector}
-                        unit={
-                          chosen.kind === "force"
-                            ? "Н"
-                            : chosen.kind === "velocity"
-                              ? "м/с"
-                              : "м/с²"
-                        }
-                        onChange={(vector) => change(chosen.id, { vector })}
-                      />
+                      {field('vector.magnitude', 'Модуль', chosen.kind === 'force' ? 'Н' : chosen.kind === 'velocity' ? 'м/с' : 'м/с²', 0)}
+                      {field('vector.angle', 'Угол', '°', 0, 360)}
+                      <details className="observed-fields"><summary>Проекции</summary>
+                        {field('vector.x', 'Проекция X', chosen.kind === 'force' ? 'Н' : chosen.kind === 'velocity' ? 'м/с' : 'м/с²')}
+                        {field('vector.y', 'Проекция Y', chosen.kind === 'force' ? 'Н' : chosen.kind === 'velocity' ? 'м/с' : 'м/с²')}
+                      </details>
                       <div className="target-summary">
                         {chosen.scope === "all"
                           ? "Все тела, включая будущие"
@@ -1104,7 +1090,7 @@ export default function App() {
                         {field("x", "x", "м", -1e5, 1e5, running)}
                         {field("y", "y", "м", -1e5, 1e5, running)}
                       </div>
-                      {!["rod", "surface"].includes(chosen.kind) && <div className="pair">
+                      {chosen.kind !== "rod" && <div className="pair">
                         {field(
                           "w",
                           chosen.kind === "circle" ||
@@ -1134,15 +1120,14 @@ export default function App() {
                             {field("mu", "Трение μ", "", 0)}
                           </div>
                           {field("restitution", "Восстановление e", "", 0, 1)}
-                          <VectorFields
-                            label="v"
-                            value={{ x: chosen.vx, y: chosen.vy }}
-                            unit="м/с"
-                            onChange={(v) =>
-                              change(chosen.id, { vx: v.x, vy: v.y })
-                            }
-                          />
+                          {field('velocity.magnitude', 'Модуль скорости', 'м/с', 0)}
+                          {field('velocity.angle', 'Угол скорости', '°', 0, 360)}
+                          <details className="observed-fields"><summary>Проекции скорости</summary>
+                            {field('vx', 'Скорость X', 'м/с')}
+                            {field('vy', 'Скорость Y', 'м/с')}
+                          </details>
                           {field("omega", "Вращение ω", "рад/с")}
+                          <details className="observed-fields"><summary>Вычисляемые величины</summary>{derivedFields.map(f => field(f.key, f.label, f.unit, -1e5, 1e5, true))}</details>
                           <label className="check">
                             <input
                               type="checkbox"
@@ -1334,77 +1319,44 @@ export default function App() {
             </div>
           </section>
           <section>
-            <h2>Переменные</h2>
+            <div className="section-heading"><h2>Переменные</h2><button title="Создать переменную" aria-label="Создать переменную" disabled={running || !!pending} onClick={() => setEditVariable('new')}><PlusIcon /></button></div>
             <div className="scroll variables">
-              {(showAuto && !running && preview?.source === scene ? preview.scene : scene).items.map((o) => (
-                <details key={o.id} open={o.id === selected || effect(o)}>
-                  <summary>
-                    {o.kind === "acceleration" && o.gravity
-                      ? "Свободное падение"
-                      : names[o.kind]}{" "}
-                    <i>{indexLabel(o)}</i>
-                  </summary>
-                  {effect(o) ? (
-                    <VectorFields
-                      label={`${o.gravity ? "g" : o.kind === "force" ? "F" : o.kind === "velocity" ? "v" : "a"}_${indexLabel(o)}`}
-                      value={o.vector}
-                      unit={
-                        o.kind === "force"
-                          ? "Н"
-                          : o.kind === "velocity"
-                            ? "м/с"
-                            : "м/с²"
-                      }
-                      onChange={(vector) => change(o.id, { vector })}
-                    />
-                  ) : body(o) ? (
-                    <>
-                      <Num
-                        label={`m_${indexLabel(o)}`}
-                        value={o.mass}
-                        unit="кг"
-                        min={o.fixed || o.trajectory ? 0 : 0.001}
-                        onChange={(mass) => change(o.id, { mass })}
-                      />
-                      <VectorFields
-                        label={`v_${indexLabel(o)}`}
-                        value={{ x: o.vx, y: o.vy }}
-                        unit="м/с"
-                        disabled={showAuto && !running}
-                        onChange={(v) => change(o.id, { vx: v.x, vy: v.y })}
-                      />
-                      {(running || showAuto) && o.derived &&
-                        observed.map(([label, i, unit]) => (
-                          <div key={i}>{variableVector(o, label, i, unit)}</div>
-                        ))}
-
-                    </>
-                  ) : o.kind !== "bearing" ? (
-                    <>
-                      <Num
-                        label={`l_${indexLabel(o)}`}
-                        value={o.length}
-                        unit="м"
-                        min={0.001}
-                        onChange={(length) => change(o.id, { length })}
-                      />
-                      {o.kind === "spring" && (
-                        <Num
-                          label={`k_${indexLabel(o)}`}
-                          value={o.stiffness}
-                          unit="Н/м"
-                          min={0}
-                          onChange={(stiffness) => change(o.id, { stiffness })}
-                        />
-                      )}
-                    </>
-                  ) : null}
-                </details>
-              ))}
+              {scene.variables?.filter(v => v.visible).map(v => <div className="variable-card" key={v.id}>
+                <div className="variable-card-line">
+                  <Symbol value={v.symbol} />
+                  <InlineNumber label={`Переменная ${v.symbol}`} value={displayValue(v, observedScene.variables?.find(x => x.id === v.id)?.value ?? v.value)} disabled={!!v.derived} onChange={n => registryChange(() => setVariable(current.current, v.id, convertUnit(n, displayUnit(v), v.unit)))} />
+                  <UnitSelect variable={v} onChange={unit => updateVariable(v.id, { displayUnit: unit })} />
+                  <button className="variable-menu-trigger" aria-label={`Действия с ${v.symbol}`} aria-haspopup="menu" aria-expanded={variableMenu?.id === v.id} title="Действия" onClick={e => {
+                    if (variableMenu?.id === v.id) return setVariableMenu(null);
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    setVariableMenu({ id: v.id, left: Math.max(8, Math.min(rect.right - 180, window.innerWidth - 188)), top: rect.bottom + 204 <= window.innerHeight ? rect.bottom + 4 : Math.max(8, rect.top - 204) });
+                  }}><DotsThreeIcon /></button>
+                </div>
+                {v.range && <div className="variable-range"><input type="range" aria-label={`Диапазон ${v.symbol}`} min={v.range.min} max={v.range.max} step={v.range.step} value={Math.max(v.range.min, Math.min(v.range.max, v.value))} onChange={e => registryChange(() => setVariable(current.current, v.id, Number(e.target.value)))} /><button onClick={() => setEditRange(v.id)} title="Редактировать range">✎</button></div>}
+                {v.graph && <button className="graph-link" onClick={() => setEditGraph(v.id)}>График зависимости ↗</button>}
+              </div>)}
+              {!scene.variables?.some(v => v.visible) && <p className="variables-empty">Покажите переменные кнопкой глаза в свойствах.</p>}
             </div>
           </section>
         </aside>
       </main>
+      {variableMenu && menuVariable && createPortal(<div className="variable-menu-layer">
+        <div className="variable-menu-dismiss" onClick={() => setVariableMenu(null)} />
+        <div className="variable-menu-items" role="menu" style={{ left: variableMenu.left, top: variableMenu.top }} onClick={() => setVariableMenu(null)}>
+          <button role="menuitem" onClick={() => { const all = current.current.variables || []; const nextId = `v${Math.max(0, ...all.map(x => Number(x.id.slice(1)) || 0)) + 1}`; const match = menuVariable.symbol.match(/^(.*?)(\d+)$/), prefix = match?.[1] || menuVariable.symbol; let index = Number(match?.[2]) || 1; while (all.some(x => x.symbol === `${prefix}${index}`)) index++; registryChange({ ...current.current, variables: [...all, { ...menuVariable, id: nextId, symbol: `${prefix}${index}`, auto: false, graph: menuVariable.graph ? structuredClone(menuVariable.graph) : undefined }] }); }}>Дублировать</button>
+          <button role="menuitem" disabled={!!menuVariable.derived} onClick={() => setEditVariable(menuVariable.id)}>Изменить</button>
+          <button role="menuitem" onClick={() => registryChange(removeVariable(current.current, menuVariable.id))}>Удалить</button>
+          <button role="menuitem" disabled={!!menuVariable.derived} onClick={() => setEditRange(menuVariable.id)}>{menuVariable.range ? 'Редактировать range' : 'Сделать range'}</button>
+          <button role="menuitem" disabled={!!menuVariable.derived} onClick={() => setEditGraph(menuVariable.id)}>{menuVariable.graph ? 'Редактировать график' : 'Сделать график'}</button>
+          {menuVariable.graph && <button role="menuitem" onClick={() => updateVariable(menuVariable.id, { graph: undefined })}>Убрать график</button>}
+        </div>
+      </div>, document.body)}
+      {editVariable && <VariableEditor key={editVariable} variable={scene.variables?.find(v => v.id === editVariable)} suggestedSymbol={newSymbol(scene.variables)} onClose={() => setEditVariable(null)} onSave={draft => {
+        try { return registryChange(saveVariable(current.current, { ...draft, ...(editVariable === 'new' ? {} : { id: editVariable }) })) ? null : 'Не удалось сохранить переменную'; }
+        catch (error) { return error instanceof Error ? error.message : String(error); }
+      }} />}
+      {editRange && scene.variables?.find(v => v.id === editRange) && <RangeEditor key={editRange} variable={scene.variables.find(v => v.id === editRange)!} onClose={() => setEditRange(null)} onSave={range => { updateVariable(editRange, { range }); setEditRange(null); }} onRemove={() => { updateVariable(editRange, { range: undefined }); setEditRange(null); }} />}
+      {editGraph && scene.variables?.find(v => v.id === editGraph) && <GraphEditor key={editGraph} variable={scene.variables.find(v => v.id === editGraph)!} variables={scene.variables} onClose={() => setEditGraph(null)} onSave={graph => { if (updateVariable(editGraph, { graph })) setEditGraph(null); }} />}
       <input
         ref={file}
         type="file"

@@ -20,6 +20,7 @@ npm run preview
 ```
 
 Каталог `frontend/dist` содержит статический сайт, Worker и файлы движка. Его нужно обслуживать по HTTP(S), а не открывать через `file://`.
+Сервер должен отдавать `engine/physics.mjs` с JavaScript MIME (`application/javascript` или `text/javascript`), а `engine/physics.wasm` — с `application/wasm`.
 
 ## Docker
 
@@ -39,6 +40,8 @@ npm ci
 npm run tauri:dev
 npm run tauri:build
 ```
+
+Worker загружает `engine/physics.mjs` относительно своего URL, поэтому один и тот же каталог `dist` работает при HTTP-раздаче и через встроенный протокол Tauri. Локальная macOS-сборка проверена запуском и остановкой симуляции; установщики других ОС собираются на GitHub Actions.
 
 Push версии, например `v0.1.0`, сначала прогоняет тесты и сборку Docker, затем создаёт черновик GitHub Release. Tauri CI загружает в него установщики с версией из тега. Черновик можно проверить и опубликовать вручную. macOS приложение подписывается ad-hoc, но не нотариализуется; Windows MSI не подписан. Для выпуска без системных предупреждений потребуются сертификат Apple с нотариализацией и сертификат подписи Windows в секретах GitHub Actions.
 

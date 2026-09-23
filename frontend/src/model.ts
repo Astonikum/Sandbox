@@ -59,7 +59,8 @@ export type Effect = {
 };
 export type Item = BodyItem | Connector | Effect;
 export type Patch = Record<string, unknown>;
-export type Scene = { version: 2; items: Item[] };
+import type { Variable } from './variables';
+export type Scene = { version: 2; items: Item[]; variables?: Variable[]; bindings?: Record<string, string> };
 export const names: Record<Kind, string> = {
   rect: "Тело",
   circle: "Тело (круг)",
@@ -311,7 +312,7 @@ export function editGeometry(s: Scene, id: string, patch: Patch): Scene {
       }
   }
   return {
-    version: 2,
+    ...s,
     items: s.items.map((o) => {
       if (o.id === id) return { ...o, ...patch } as Item;
       if (!geo(o) || !joined.has(o.id)) return o;
@@ -419,7 +420,7 @@ export function attachScene(s: Scene, id: string, tolerance = 0.15): Scene {
       .flatMap((o) => o.ends)
       .filter((a): a is Attachment => !!a))
       resolve(a, items);
-    return { version: 2, items };
+    return { ...s, items };
   } catch {
     return s;
   }
@@ -443,7 +444,7 @@ export function removeItem(s: Scene, id: string): Scene {
         : { ...o, ends };
     });
   return {
-    version: 2,
+    ...s,
     items: items.filter(
       (o) => !effect(o) || o.scope === "all" || o.targets.length > 0,
     ),
@@ -458,7 +459,7 @@ export function rename(s: Scene, id: string, to: string): Scene {
   const ref = (a: Attachment | null) =>
     a ? { ...a, id: a.id === id ? to : a.id } : null;
   return {
-    version: 2,
+    ...s,
     items: s.items.map((o) =>
       effect(o)
         ? {
@@ -575,6 +576,37 @@ export function validate(value: unknown): Scene {
     s = migrate(s as unknown as Record<string, unknown>);
   if (s.version !== 2 || s.items.length > 200)
     throw Error("Нужна версия 2, не более 200 объектов");
+  if (s.variables !== undefined) {
+    if (!Array.isArray(s.variables) || s.variables.length > 10000) throw Error('Некорректный список переменных');
+    const variableIds = new Set<string>(), symbols = new Set<string>();
+    for (const v of s.variables) {
+      if (!v || typeof v.id !== 'string' || !/^v[1-9][0-9]*$/.test(v.id) || variableIds.has(v.id) ||
+          typeof v.symbol !== 'string' || !v.symbol || v.symbol.length > 40 || symbols.has(v.symbol) ||
+          typeof v.unit !== 'string' || v.unit.length > 30 || typeof v.visible !== 'boolean' || !num(v.value))
+        throw Error('Некорректная переменная');
+      variableIds.add(v.id); symbols.add(v.symbol);
+      if (v.auto !== undefined && typeof v.auto !== 'boolean') throw Error('Некорректная переменная');
+      if (v.displayUnit !== undefined && (typeof v.displayUnit !== 'string' || v.displayUnit.length > 30)) throw Error('Некорректная единица измерения');
+      if (v.visibilityLocked !== undefined && typeof v.visibilityLocked !== 'boolean') throw Error('Некорректная видимость переменной');
+      if (v.derived && (typeof v.derived.itemId !== 'string' || !Number.isInteger(v.derived.index) || v.derived.index < 0 || v.derived.index >= 20 || !s.items.some(o => o.id === v.derived!.itemId && body(o))))
+        throw Error('Некорректная вычисляемая переменная');
+      if (v.range && (!num(v.range.min) || !num(v.range.max) || !num(v.range.step) || v.range.min >= v.range.max || v.range.step <= 0))
+        throw Error('Некорректный диапазон');
+      if (v.graph && (typeof v.graph.source !== 'string' || !Array.isArray(v.graph.points) || v.graph.points.length < 2 || v.graph.points.length > 500 ||
+          v.graph.points.some((p, i) => !num(p.x) || !num(p.y) || (p.inY !== undefined && !num(p.inY)) || (p.outY !== undefined && !num(p.outY)) || (i > 0 && p.x <= v.graph!.points[i-1].x))))
+        throw Error('Некорректный график');
+    }
+    if (s.variables.some(v => v.graph && v.graph.source !== 'time' && !variableIds.has(v.graph.source))) throw Error('Отсутствует переменная графика');
+    const byId = new Map(s.variables.map(v => [v.id, v]));
+    const visit = (id: string, seen = new Set<string>()) => {
+      if (seen.has(id)) throw Error('Цикл зависимостей графиков');
+      const source = byId.get(id)?.graph?.source;
+      if (source && source !== 'time') { seen.add(id); visit(source, seen); }
+    };
+    for (const v of s.variables) visit(v.id);
+    if (s.bindings && (typeof s.bindings !== 'object' || Array.isArray(s.bindings) || Object.entries(s.bindings).some(([key, id]) => !/^[^:]+:[a-z.0-9]+$/.test(key) || !variableIds.has(id))))
+      throw Error('Некорректная привязка переменной');
+  }
   const ids = new Set<string>();
   for (const o of s.items) {
     if (

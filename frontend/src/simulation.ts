@@ -1,5 +1,6 @@
 import type { BodyItem, Patch, Scene } from "./model";
 import { body } from "./model";
+import { convertUnit, fields, readField } from './variables';
 export type Metrics = {
   time: number;
   fps: number;
@@ -23,6 +24,8 @@ export class Simulation {
   private rendered: Float64Array | undefined;
   private forceSamples: BodyItem["forceSamples"][] = [];
   private derived: Float64Array | undefined;
+  private variableValues: number[] | undefined;
+  private bindingsByVariable = new Map<string, [string, string]>();
   private metrics: Metrics = {
     time: 0,
     fps: 0,
@@ -48,6 +51,10 @@ export class Simulation {
     onError: (message: string) => void,
   ) {
     this.config = structuredClone(scene);
+    for (const [binding, id] of Object.entries(scene.bindings || {})) {
+      const [itemId, key] = binding.split(':');
+      if (!this.bindingsByVariable.has(id)) this.bindingsByVariable.set(id, [itemId, key]);
+    }
     this.getDrag = getDrag;
     this.onFrame = onFrame;
     this.onError = onError;
@@ -87,6 +94,7 @@ export class Simulation {
           this.rendered = data.rendered;
           this.derived = data.derived;
           this.forceSamples = data.forceSamples;
+          this.variableValues = data.variableValues;
           this.metrics = {
             ...this.metrics,
             time: data.time,
@@ -111,12 +119,16 @@ export class Simulation {
       this.config.items.find((o) => o.id === id)!,
       patch,
     );
+    const item = this.config.items.find(o => o.id === id)!;
+    for (const field of fields(item)) {
+      const variableId = this.config.bindings?.[`${id}:${field.key}`];
+      const variable = this.config.variables?.find(v => v.id === variableId);
+      if (variable && !field.computed) variable.value = convertUnit(readField(item, field.key), field.unit, variable.unit);
+    }
   }
   private sceneAt(values: Float64Array) {
     let i = 0;
-    return {
-      ...this.config,
-      items: this.config.items.map((o) => {
+    const items = this.config.items.map((o) => {
         if (!body(o)) return o;
         const index = i++;
         const [x, y, angle, vx, vy, omega] = values.subarray(
@@ -136,7 +148,22 @@ export class Simulation {
             ? Array.from(this.derived.subarray(index * 20, (index + 1) * 20))
             : undefined,
         };
+      });
+    const byId = new Map(items.map(o => [o.id, o]));
+    return {
+      ...this.config,
+      variables: this.config.variables?.map((v, j) => {
+        const computed = v.derived && byId.get(v.derived.itemId);
+        if (computed && body(computed)) return { ...v, value: computed.derived?.[v.derived!.index] ?? 0 };
+        const binding = this.bindingsByVariable.get(v.id);
+        if (binding) {
+          const [itemId, key] = binding;
+          const item = byId.get(itemId);
+          if (item && body(item) && ['x', 'y', 'angle', 'vx', 'vy', 'omega', 'velocity.magnitude', 'velocity.angle'].includes(key)) return { ...v, value: convertUnit(readField(item, key), fields(item).find(f => f.key === key)!.unit, v.unit) };
+        }
+        return { ...v, value: this.variableValues?.[j] ?? v.value };
       }),
+      items,
     };
   }
   private frame = (now: number) => {
