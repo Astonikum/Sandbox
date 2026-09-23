@@ -142,6 +142,7 @@ jobs:
       - name: Set the desktop app version from its release tag
         env:
           TAG: ${{ github.ref_name }}
+        working-directory: frontend
         run: node --input-type=module -e 'import { readFileSync, writeFileSync } from "node:fs"; const path = "src-tauri/tauri.conf.json"; const config = JSON.parse(readFileSync(path, "utf8")); config.version = process.env.TAG.slice(1); writeFileSync(path, JSON.stringify(config, null, 2) + "\n");'
       - uses: tauri-apps/tauri-action@v0
         env:
