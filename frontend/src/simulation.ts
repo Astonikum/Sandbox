@@ -1,4 +1,4 @@
-import type { BodyItem, Patch, Scene } from "./model";
+import type { BodyItem, Patch, Scene, Vec } from "./model";
 import { body } from "./model";
 import { convertUnit, fields, readField } from './variables';
 export type Metrics = {
@@ -37,7 +37,7 @@ export class Simulation {
   private frames = 0;
   private measure = 0;
   private timer: ReturnType<typeof setTimeout> | undefined;
-  private getDrag: () => { id: string; x: number; y: number } | null;
+  private getDrag: () => { id: string; x: number; y: number; local: Vec } | null;
   private onFrame: (scene: Scene, display: Scene, metrics: Metrics) => void;
   private onError: (message: string) => void;
   private visibility = () => {
@@ -46,7 +46,7 @@ export class Simulation {
   };
   constructor(
     scene: Scene,
-    getDrag: () => { id: string; x: number; y: number } | null,
+    getDrag: () => { id: string; x: number; y: number; local: Vec } | null,
     onFrame: (scene: Scene, display: Scene, metrics: Metrics) => void,
     onError: (message: string) => void,
   ) {

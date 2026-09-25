@@ -15,6 +15,7 @@
         "title": "Механика — физическая песочница",
         "width": 800,
         "height": 600,
+        "dragDropEnabled": false,
         "resizable": true,
         "fullscreen": false
       }

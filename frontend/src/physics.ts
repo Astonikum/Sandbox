@@ -65,7 +65,7 @@ export function linksFor(s: Scene): Link[] {
         pulley = bs.findIndex((b) => b.id === o.via);
       add(
         o.id,
-        o.kind === "spring" ? 3 : pulley >= 0 ? 10 : 4,
+        o.kind === "spring" ? 3 : pulley >= 0 && a.body && b.body ? 10 : 4,
         a,
         b,
         o.length,

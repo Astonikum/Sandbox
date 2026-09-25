@@ -74,6 +74,24 @@ p = sample();
 assert.ok(Math.abs(p[0] - 1) < 1e-12);
 assert.ok(Math.abs(p[3]) < 1e-12);
 assert.ok(Math.abs(p[4] - Math.E) < 1e-12);
+const fixedDriven = [...base];
+fixedDriven[12] = 3;
+reset([fixedDriven], 0);
+assert.equal(trajectory('t'), 0);
+ticks(10);
+const stoppedAt = sample()[0];
+assert.equal(engine._engine_trajectory(0, 0), 0);
+ticks(10);
+assert.ok(Math.abs(sample()[0] - stoppedAt) < 1e-12);
+assert.equal(sample()[3], 0, 'fixed body has no residual velocity after trajectory is disabled');
+const masslessDriven = [...base];
+masslessDriven[6] = 0;
+masslessDriven[12] = 2;
+reset([masslessDriven], 0);
+assert.equal(trajectory('t'), 0);
+assert.equal(engine._engine_trajectory(0, 0), 1, 'massless free body cannot leave kinematic mode');
+ticks(10);
+assert.ok(sample()[0] > 0, 'rejected transition keeps trajectory running');
 // Same physical result for display schedules of 60, 144 and 240 Hz.
 const source = ts.transpileModule(
   readFileSync(new URL("../src/wasm-api.ts", import.meta.url), "utf8"),
@@ -91,12 +109,33 @@ for (const hz of [60, 144, 240]) {
 const clock = new FixedClock();
 assert.equal(clock.consume(1), 24);
 assert.ok(clock.dropped > 0.89);
+// Dragging a body from an off-center point must not pull its center to the cursor.
+const grabbed = [...base];
+grabbed[3] = grabbed[4] = 1;
+reset([grabbed], 0);
+assert.equal(engine._engine_drag_point(0.4, 0), 0);
+assert.equal(engine._engine_tick(0, 0.4, 0), 0);
+p = sample();
+assert.ok(Math.abs(p[0]) < 1e-12 && Math.abs(p[5]) < 1e-12);
+assert.equal(engine._engine_tick(0, 0.4, 0.5), 0);
+p = sample();
+assert.ok(p[5] > 0, 'pulling off center must rotate the body');
+console.log('PASS WASM drag keeps the grabbed point under the cursor and applies torque');
 // Contact, friction and rope constraints through the actual WASM ABI.
 const floor = [...base];
 floor[2] = 0.2;
 floor[3] = 2;
 floor[4] = 0.1;
 floor[12] = 1;
+const frictionFloor = [...floor];
+frictionFloor[7] = 0.3;
+frictionFloor[9] = 1;
+const frictionBody = [...base];
+frictionBody[7] = 0.3;
+reset([frictionBody, frictionFloor]);
+assert.equal(engine._engine_body(1, 9, 1), 1, 'fixed support rejects imposed translation speed');
+ticks(240);
+assert.ok(Math.abs(sample()[3]) < 1e-9, 'fixed support cannot propel the body by stale vx');
 reset([base, floor]);
 ticks(240);
 assert.ok(Math.abs(sample()[1] - 0.1) < 0.0002);
@@ -430,3 +469,67 @@ ticks(1);
 assert.ok(Math.abs(derived()[6])>0);
 assert.ok(Math.abs(derived()[16]+derived()[4]+derived()[6])<1e-8);
 console.log('PASS force application points, opposing springs, action/reaction and weight with friction');
+
+// A square sliding on a straight incline must keep both normal contacts in
+// balance while friction acts below its center of mass.
+for (const [angle, mu, kind] of [
+  [.25, .3, 0], [.28, .3, 0], [.32, .3, 0], [.4, .3, 0], [-.4, .3, 0],
+  [.4, 0, 0], [.4, 0, 1],
+]) {
+  const tangent = [Math.cos(angle), Math.sin(angle)];
+  const normal = [-tangent[1], tangent[0]];
+  const dot2 = (x, y) => x[0]*y[0]+x[1]*y[1];
+  const body = [...base], support = [...lineSupport];
+  body[0] = kind; body[1] = -.2*normal[0]; body[2] = -.2*normal[1];
+  body[3] = body[4] = .4; body[5] = angle; body[7] = mu;
+  support[1] = support[2] = 0; support[3] = 8; support[5] = angle; support[7] = mu;
+  reset([body, support]);
+  const expectedAcceleration = Math.sign(angle)*Math.max(0, 9.81*(Math.abs(Math.sin(angle))-mu*Math.cos(angle)));
+  const expectedNormal = 9.81*Math.cos(angle);
+  const expectedFriction = Math.min(Math.abs(9.81*Math.sin(angle)), mu*expectedNormal);
+  for (let tick = 1; tick <= 300; tick++) {
+    ticks(1);
+    if (tick < 100) continue;
+    const state = sample(), d = derived(), forces = forceSamples();
+    const along = dot2(d.slice(0, 2), tangent), across = dot2(d.slice(0, 2), normal);
+    const reaction = forces.find(f => f[0] === 0 && f[1] === 1);
+    assert.ok(Math.abs(along-expectedAcceleration) < .02, `incline tangential acceleration: ${angle}, ${mu}, ${kind}, ${tick}`);
+    assert.ok(Math.abs(across) < .02, `incline normal acceleration: ${angle}, ${mu}, ${kind}, ${tick}`);
+    assert.ok(Math.abs(Math.hypot(d[4], d[5])-expectedNormal) < .02, `incline reaction: ${angle}, ${mu}, ${kind}, ${tick}`);
+    assert.ok(Math.abs(Math.hypot(d[6], d[7])-expectedFriction) < .02, `incline friction: ${angle}, ${mu}, ${kind}, ${tick}`);
+    assert.ok(Math.abs(state[5]) < .001 && Math.abs(d[19]) < .02, `incline angular stability: ${angle}, ${mu}, ${kind}, ${tick}`);
+    assert.ok(reaction && Math.abs(reaction[2]-Math.sign(angle)*expectedFriction/expectedNormal*.2) < .002,
+      `incline contact point: ${angle}, ${mu}, ${kind}, ${tick}`);
+    if (kind === 0) assert.ok(Math.abs(reaction[3]-.2) < .002, 'square reaction remains on bottom face');
+  }
+  const state = sample(), elapsed = engine._engine_time();
+  assert.ok(Math.abs(dot2(state.slice(3, 5), tangent)-expectedAcceleration*elapsed) < .01, 'incline accumulated speed');
+  assert.ok(Math.abs(dot2([state[0]-body[1], state[1]-body[2]], tangent)-expectedAcceleration*elapsed**2/2) < .01,
+    'incline accumulated travel');
+}
+console.log('PASS WASM incline: static and sliding square, frictionless square and circle');
+
+const rollingCircle = [...base], rollingFloor = [...floor];
+rollingCircle[0] = 1;
+rollingCircle[2] = -1;
+rollingCircle[3] = rollingCircle[4] = .4;
+rollingCircle[7] = .5;
+rollingCircle[9] = .2;
+rollingCircle[11] = 1;
+rollingFloor[2] = .1;
+rollingFloor[3] = 100;
+rollingFloor[4] = .2;
+rollingFloor[7] = .5;
+reset([rollingCircle, rollingFloor]);
+ticks(2880);
+const restingCircle = sample();
+assert.deepEqual(restingCircle.slice(3), [0, 0, 0]);
+ticks(240);
+assert.ok(Math.hypot(sample()[0] - restingCircle[0], sample()[1] - restingCircle[1]) < 1e-8);
+assert.equal(engine._engine_body(0, 9, .5), 0);
+ticks(24);
+assert.ok(sample()[0] > restingCircle[0] + .01);
+assert.equal(engine._engine_body(1, 2, 10), 0);
+ticks(24);
+assert.ok(sample()[4] > .9);
+console.log('PASS WASM rolling rest, persistent rest, live impulse and removed support');

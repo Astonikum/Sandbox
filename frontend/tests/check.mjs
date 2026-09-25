@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync, mkdirSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import ts from "typescript";
 const url = (source) =>
@@ -28,6 +28,8 @@ const {
   resolve,
   editGeometry,
   endpoint,
+  indexLabel,
+  itemLabel,
 } = await import(modelUrl);
 const { linksFor } = await import(
   url(
@@ -154,22 +156,7 @@ assert.ok(migrated.items.filter(body).length > 0);
 console.log(
   "PASS model: v2 round-trip, old-project migration, indices, zero mass, vectors without geometry, target scopes, deletion, rod weld, bearing, no body-body weld",
 );
-mkdirSync("../engine/build", { recursive: true });
-execFileSync(
-  process.env.CXX || "g++",
-  [
-    "-std=c++17",
-    "-O2",
-    "../engine/src/main.cpp",
-    "-o",
-    "../engine/build/physics.exe",
-  ],
-  { windowsHide: true },
-);
-execFileSync("../engine/build/physics.exe", ["--test"], {
-  stdio: "inherit",
-  windowsHide: true,
-});
+execFileSync(process.execPath, ["../engine/test.mjs"], { stdio: "inherit", windowsHide: true });
 
 const { drawOrder, hit, paint } = await import(url(
   readFileSync(new URL("../src/render.ts", import.meta.url), "utf8")
@@ -250,7 +237,15 @@ const indexed = numberScene({ version: 2, items: [
   make("circle", "b"), make("bearing", "h"), make("spring", "k"),
   make("spring", "k2"),
 ] });
-assert.deepEqual(indexed.items.map(o => o.index), [1, 1, 1, 2, 1, 1, 2]);
+assert.deepEqual(indexed.items.map(o => o.index), [undefined, 1, 1, 2, 1, 1, 2]);
+assert.equal(indexLabel(indexed.items[0]), "");
+assert.equal(itemLabel(indexed.items[0]), "Поверхность");
+assert.throws(() => reindex(indexed, "s", "2"), /нет индекса/);
+const legacySurface = { ...indexed.items[0], index: 42 };
+const importedSurface = validate({ ...indexed, items: [legacySurface, ...indexed.items.slice(1)] });
+assert.equal(importedSurface.items[0].id, "s");
+assert.equal(importedSurface.items[0].w, legacySurface.w);
+assert.ok(!("index" in importedSurface.items[0]));
 indexed.items[2].ends[0] = { id: "a", local: { x: 0, y: 0 } };
 const relabeled = reindex(indexed, "a", "3");
 assert.equal(relabeled.items[1].id, "a");
@@ -268,10 +263,6 @@ assert.deepEqual(validate({ version: 2, items: [make("rect", "old42"), make("cir
 assert.deepEqual(numberScene({ version: 2, items: [make("rect", "missing"), { ...make("rect", "explicit"), index: 1 }] }).items.map(o => o.index), [2, 1]);
 console.log("PASS category indices, stable references, rename validation, snapshots and legacy import");
 
-execFileSync(process.env.CXX || "g++", [
-  "-std=c++17", "-O2", "../engine/tests/conservation.cpp", "-o", "../engine/build/conservation.exe",
-], { windowsHide: true });
-execFileSync("../engine/build/conservation.exe", [], { stdio: "inherit", windowsHide: true });
 
 // Resizing a lever must not drag the assembly attached at its unchanged end.
 for (const angle of [0, .6, Math.PI / 2]) {
@@ -387,10 +378,27 @@ for (const scene of [bearingScene, validate(JSON.parse(JSON.stringify(bearingSce
   assert.equal(links.filter(l => l.kind === 2).length, 1);
 }
 assert.equal(linksFor(removeItem(bearingScene, jointPin.id)).filter(l => l.kind === 12).length, 1);
+const ropeBody = make('rect', 'rope-body', .1, 0);
+const ropeOther = make('rect', 'rope-other', 2, 0);
+const ropePulley = make('pulley', 'rope-pulley', 1, 1);
+const looseRope = make('rope', 'loose-rope', 0, 0);
+looseRope.via = ropePulley.id;
+looseRope.ends[0] = { id: ropeBody.id, local: { x: 0, y: 0 } };
+const ropeItems = [ropeBody, ropeOther, ropePulley, looseRope];
+assert.equal(linksFor({ version: 2, items: ropeItems })[0].kind, 4, 'one-ended rope over pulley remains unilateral');
+looseRope.ends[1] = { id: ropeOther.id, local: { x: 0, y: 0 } };
+assert.equal(linksFor({ version: 2, items: ropeItems })[0].kind, 10, 'two-ended rope uses pulley constraint');
 labels.length = 0;
 paint(canvas, initial, { x: 0, y: 0, scale: 90 }, null, false, false);
 assert.ok(labels.includes("g"), "gravity acceleration is visible before simulation");
+assert.ok(!labels.includes("s"), "surface has no canvas caption");
 assert.ok(!labels.includes("Fтяж"), "automatic gravity force hidden before simulation");
+const sampledSurface = { ...make("surface", "support"), fixed: false, mass: 1, index: 42,
+  derived: Array(20).fill(0), forceSamples: [{ source: 0, category: 1, point: { x: 0, y: 0 }, vector: { x: 0, y: -1 } }] };
+labels.length = 0;
+paint(canvas, { version: 2, items: [sampledSurface] }, { x: 0, y: 0, scale: 90 }, null, false, true);
+assert.ok(labels.includes("N"));
+assert.ok(!labels.includes("s") && !labels.includes("42"), "computed surface forces have no surface number");
 labels.length = 0;
 paint(canvas, initial, { x: 0, y: 0, scale: 90 }, null, false, false, [], null, true);
 assert.ok(labels.includes("Fтяж"), "auto-vector toggle reveals calculated gravity force");
@@ -432,7 +440,13 @@ repeated.derived[1] = 8;
 repeated.derived[15] = 8;
 labels.length = 0;
 paint(canvas, { version: 2, items: [repeated, gravityEffect] }, { x: 0, y: 0, scale: 90 }, null, false, true);
-assert.ok(labels.includes('a') && !labels.includes('FΣ'), 'resultant force is not drawn even when distinct');
+assert.ok(!labels.includes('a') && !labels.includes('FΣ'), 'duplicate acceleration visibility ignores numeric drift');
+for (const delta of [9e-7, 1.1e-6, 9e-7]) {
+  repeated.derived[1] = 9.81 + delta;
+  labels.length = 0;
+  paint(canvas, { version: 2, items: [repeated, gravityEffect] }, { x: 0, y: 0, scale: 90 }, null, false, true);
+  assert.equal(labels.filter(name => name === 'a').length, 0);
+}
 const forceEffect = make('force', 'force-effect');
 forceEffect.scope = 'selection'; forceEffect.targets = [repeated.id]; forceEffect.vector = { x: 5, y: 0 };
 repeated.derived[14] = 5; repeated.derived[15] = 0;
@@ -440,6 +454,12 @@ labels.length = 0;
 paint(canvas, { version: 2, items: [repeated, forceEffect] }, { x: 0, y: 0, scale: 90 }, null, false, true);
 assert.ok(labels.includes('F'));
 assert.ok(!labels.includes('FΣ'), 'matching resultant is already shown as applied force');
+for (const delta of [9e-7, 1.1e-6, 9e-7]) {
+  repeated.derived[1] = 9.81 + delta;
+  labels.length = 0;
+  paint(canvas, { version: 2, items: [repeated, gravityEffect, forceEffect] }, { x: 0, y: 0, scale: 90 }, null, false, true);
+  assert.equal(labels.filter(name => name === 'a').length, 1);
+}
 console.log('PASS duplicate acceleration is suppressed and resultant force is omitted');
 
 // Capture shaft origins without changing the renderer's physical geometry.
@@ -497,6 +517,65 @@ for (const scale of [30,90,300]) {
   assert.ok(edgeGap<=6.001,'caption remains adjacent at every zoom');
 }
 console.log('PASS force captions stay beside arrow tips in crowded scenes at all zoom levels');
+
+// A tiny motion of nearby geometry must not change a stable force caption's
+// slot; a real obstruction should still make it move.
+const stableCaptions = [];
+const stableContext = new Proxy({}, {
+  get: (_, key) => key === 'measureText' ? () => ({width:10/90}) :
+    key === 'fillText' ? (name,x,y) => {
+      if (name === 'F' || name === 'N') stableCaptions.push({name,x,y});
+    } : () => {},
+  set: () => true,
+});
+const stableCanvas = {...canvas, getContext: () => stableContext};
+const stableBody = make('rect','stable-body');
+const nearbyBody = make('rect','nearby-body',1.3919999999999,-.8);
+const stableForce = make('force','stable-force');
+stableForce.scope = 'selection'; stableForce.targets = [stableBody.id];
+stableForce.vector = {x:5,y:0};
+const stableScene = {version:2,items:[stableBody,nearbyBody,stableForce]};
+const paintStable = () => {
+  stableCaptions.length = 0;
+  paint(stableCanvas,stableScene,{x:0,y:0,scale:90},null,false,false,[],null,true);
+  return stableCaptions.map(p => ({...p}));
+};
+const originalCaption = paintStable()[0];
+for (const x of [1.3929999999999,1.3919999999999,1.3929999999999]) {
+  nearbyBody.x = x;
+  const caption = paintStable()[0];
+  assert.ok(Math.abs(caption.y-originalCaption.y) < 1e-12,
+    'one millimeter of neighbor motion cannot move F by 36 pixels');
+}
+nearbyBody.x = .9; nearbyBody.y = .18;
+assert.ok(Math.abs(paintStable()[0].y-originalCaption.y) > .1,
+  'a body substantially covering the caption makes it relocate');
+
+// Separate arrows and contact sources keep independent caption histories.
+nearbyBody.y = -.8;
+const secondForce = make('force','second-force');
+secondForce.scope = 'selection'; secondForce.targets = [stableBody.id];
+secondForce.vector = {x:5,y:0};
+stableScene.items.push(secondForce);
+const twoCaptions = paintStable().filter(p => p.name === 'F');
+assert.equal(twoCaptions.length,2);
+assert.notDeepEqual(twoCaptions[0],twoCaptions[1]);
+nearbyBody.x += .001;
+const nextCaptions = paintStable().filter(p => p.name === 'F');
+assert.deepEqual(nextCaptions,twoCaptions,'neighbor motion keeps both arrow captions stable');
+stableScene.items.pop();
+stableBody.derived = Array(20).fill(0);
+stableBody.forceSamples = [
+  {source:1,category:1,point:{x:-.2,y:.5},vector:{x:0,y:-5}},
+  {source:2,category:1,point:{x:.2,y:.5},vector:{x:0,y:-5}},
+];
+const contactCaptions = paintStable().filter(p => p.name === 'N');
+assert.equal(contactCaptions.length,2);
+stableBody.forceSamples[0].point.x += .001;
+const movedContactCaptions = paintStable().filter(p => p.name === 'N');
+assert.ok(contactCaptions.every((p,i) => Math.abs(p.y-movedContactCaptions[i].y) < .01),
+  'contact captions follow small point changes without switching slots');
+console.log('PASS stable vector captions across small motion, real obstruction and multiple contacts');
 
 const bodyCaptions = [], rotations = [];
 let textRotation = 0;

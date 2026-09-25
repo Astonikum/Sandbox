@@ -6,6 +6,7 @@ export type WasmEngine = {
   _engine_formulas(): number;
   _engine_reset(bodies: number, links: number, g: number): number;
   _engine_tick(drag: number, x: number, y: number): number;
+  _engine_drag_point(x: number, y: number): number;
   _engine_sample(t: number): number;
   _engine_time(): number;
   _engine_body(i: number, field: number, v: number): number;

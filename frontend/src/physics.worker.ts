@@ -91,6 +91,7 @@ function effects() {
 }
 function velocity(o: Effect) {
   for (const b of targets(o, bodies)) {
+    if (b.fixed && !b.trajectory) continue;
     const i = bodies.indexOf(b);
     check(engine._engine_body(i, 9, o.vector.x));
     check(engine._engine_body(i, 10, o.vector.y));
@@ -181,6 +182,8 @@ async function initialize(s: Scene, mode: string) {
   scene = s;
   bodies = s.items.filter(body);
   links = linksFor(s);
+  if (bodies.length > 200 || links.length > 400)
+    throw Error(`Превышен лимит движка: не более 200 тел и 400 связей (сейчас ${bodies.length} тел, ${links.length} связей).`);
   staticMode = mode === "static";
   if (staticMode && bodies.some((b) => b.trajectory))
     throw Error("Статика требует отключить заданные движения.");
@@ -202,7 +205,7 @@ async function initialize(s: Scene, mode: string) {
         b.vx,
         b.vy,
         b.omega,
-        b.trajectory ? 2 : Number(b.fixed),
+        b.trajectory ? (b.fixed ? 3 : 2) : Number(b.fixed),
         0,
         0,
         0,
@@ -272,6 +275,7 @@ self.onmessage = async ({ data }) => {
         ? Math.min(32, 12000 - staticSteps)
         : clock.consume(data.elapsed),
       drag = data.drag ? bodies.findIndex((b) => b.id === data.drag.id) : -1;
+    if (drag >= 0) check(engine._engine_drag_point(data.drag.local.x, data.drag.local.y));
     let residual = 0,
       settled = false;
     for (let i = 0; i < count; i++) {

@@ -128,6 +128,7 @@ export function pulleyPath(a: Vec, b: Vec, p: Geometry) {
   };
 }
 const vectorOffsets = new WeakMap<HTMLCanvasElement, Map<string, Vec>>();
+const vectorLabelSlots = new WeakMap<HTMLCanvasElement, Map<string, { slot: number; overlap: number }>>();
 export function paint(
   canvas: HTMLCanvasElement,
   scene: Scene,
@@ -207,15 +208,28 @@ export function paint(
     c.font = `italic ${10 / z}px Georgia`;
     return nameWidth + c.measureText(id).width;
   };
-  const placeLabel = (name: string, id: string, candidates: Vec[], exclude?: Bounds) => {
+  const previousLabelSlots = vectorLabelSlots.get(canvas);
+  const nextLabelSlots = new Map<string, { slot: number; overlap: number }>();
+  vectorLabelSlots.set(canvas, nextLabelSlots);
+  const placeLabel = (name: string, id: string, candidates: Vec[], exclude?: Bounds, key?: string) => {
     const w = labelWidth(name, id);
-    let best = candidates[0], bestScore = Infinity;
-    for (const p of candidates) {
+    const scoreAt = (p: Vec) => {
       const box = { x: p.x, y: p.y - 15 / z, w, h: 20 / z };
-      const score = occupied.reduce((sum, other) => sum + (other === exclude ? 0 : overlap(box, other)), 0);
-      if (score < bestScore) { best = p; bestScore = score; }
-      if (score === 0) break;
+      return occupied.reduce((sum, other) => sum + (other === exclude ? 0 : overlap(box, other)), 0);
+    };
+    const previous = key === undefined ? undefined : previousLabelSlots?.get(key);
+    let bestIndex = previous && previous.slot < candidates.length &&
+      scoreAt(candidates[previous.slot]) <= previous.overlap + w * 20 / z * .15 ? previous.slot : -1;
+    if (bestIndex < 0) {
+      let bestScore = Infinity;
+      for (let i = 0; i < candidates.length; i++) {
+        const score = scoreAt(candidates[i]);
+        if (score < bestScore) { bestIndex = i; bestScore = score; }
+        if (score === 0) break;
+      }
     }
+    const best = candidates[bestIndex];
+    if (key !== undefined) nextLabelSlots.set(key, { slot: bestIndex, overlap: scoreAt(best) });
     label(name, id, best);
     occupied.push({ x: best.x, y: best.y - 15 / z, w, h: 20 / z });
   };
@@ -230,15 +244,14 @@ export function paint(
       { x: box.x - w - 4 / z, y: box.y + 5 / z },
     ];
   };
-  const sameVector = (a: Vec, b: Vec) =>
-    Math.hypot(a.x - b.x, a.y - b.y) <= 1e-7 * Math.max(1, Math.hypot(a.x, a.y), Math.hypot(b.x, b.y));
   const accelerations: { origin: Vec; v: Vec; name: string; id: string }[] = [];
   const previousOffsets = vectorOffsets.get(canvas);
   const nextOffsets = new Map<string, Vec>();
   vectorOffsets.set(canvas, nextOffsets);
-  const arrow = (origin: Vec, v: Vec, name: string, id: string, detached = false) => {
+  const arrow = (origin: Vec, v: Vec, name: string, id: string, detached = false, identity?: string) => {
     const mag = Math.hypot(v.x, v.y);
     if (!Number.isFinite(mag) || mag === 0) return;
+    const labelKey = identity ?? `${name}:${id}:${"id" in origin ? origin.id : ""}`;
     // Let small vectors approach zero continuously: a minimum shaft length
     // makes a tiny sign change look like a large physical impulse.
     const length = Math.min(1.7, Math.log1p(mag) * 0.35),
@@ -296,7 +309,7 @@ export function paint(
       { x: end.x - captionWidth - 6 / z, y: end.y + 16 / z },
       { x: end.x + 6 / z, y: end.y - 20 / z },
       { x: end.x - captionWidth - 6 / z, y: end.y - 20 / z },
-    ]);
+    ], undefined, labelKey);
     c.restore();
   };
   if (grid) {
@@ -371,9 +384,11 @@ export function paint(
         }
       }
       c.restore();
-      const name = o.kind === "surface" ? "s" : o.kind === "rod" ? "l" : "m";
-      const box = geometryBounds.get(o.id)!;
-      placeLabel(name, indexLabel(o), beside(box, name, indexLabel(o)));
+      if (o.kind !== "surface") {
+        const name = o.kind === "rod" ? "l" : "m";
+        const box = geometryBounds.get(o.id)!;
+        placeLabel(name, indexLabel(o), beside(box, name, indexLabel(o)));
+      }
     } else if (o.kind === "bearing") {
       const p = center(o, scene.items);
       dot(p, o.w / 2);
@@ -506,7 +521,8 @@ export function paint(
         // The load on a fixed surface is already shown as P from its body.
         if (b.kind === "surface" && b.fixed) continue;
         const point = world(b, f.point);
-        arrow(point, f.vector, names[f.category], indexLabel(b));
+        arrow(point, f.vector, names[f.category], indexLabel(b), false,
+          `${b.id}:${f.source}:${f.category}`);
       }
       // Weight is exerted ON the support/suspension, opposite to its reaction.
       // Combine normal and friction for the same contact application point.
@@ -518,10 +534,11 @@ export function paint(
         total.vector.x -= f.vector.x; total.vector.y -= f.vector.y;
         supports.set(key, total);
       }
-      for (const f of supports.values())
-        arrow(world(b, f.point), f.vector, "P", indexLabel(b));
+      for (const [source, f] of supports)
+        arrow(world(b, f.point), f.vector, "P", indexLabel(b), false, `${b.id}:${source}:P`);
       const acceleration = { x: d[0], y: d[1] };
-      if (!applied.some(e => e.kind === "acceleration" && sameVector(e.vector, acceleration)))
+      if (!applied.some(e => e.kind === "acceleration") ||
+          applied.some(e => e.kind === "force") || b.forceSamples?.length)
         accelerations.push({ origin: b, v: acceleration, name: "a", id: indexLabel(b) });
     } else {
       let x = 0,

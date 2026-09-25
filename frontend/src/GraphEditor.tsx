@@ -57,7 +57,7 @@ export function GraphEditor({ variable, variables, onSave, onClose }: { variable
         <label>Масштаб X <input type="number" min="1" max="1000" value={scaleX} onChange={e => setScaleX(Math.max(1, Math.min(1000, Number(e.target.value) || 1)))} /></label>
         <label>Y, {displayUnit(variable)} <input type="number" min="1" max="1000" value={scaleY} onChange={e => setScaleY(Math.max(1, Math.min(1000, Number(e.target.value) || 1)))} /></label></div>
       <svg ref={svg} className="graph-canvas" viewBox="0 0 780 420" role="img" aria-label="Редактор графика: двойной щелчок добавляет точку" onDoubleClick={e => { const p = position(e); if (points.some(q => Math.abs(q.x - p.x) < .001)) return; setPoints([...points, p].sort((a, b) => a.x - b.x)); }}
-        onPointerMove={e => { if (!drag.current) return; const p = position(e), d = drag.current; setPoints(old => old.map((v, i) => i !== d.index ? v : d.kind === 'point' ? { ...v, x: Math.max(old[i-1]?.x + .001 || -1e5, Math.min(old[i+1]?.x - .001 || 1e5, p.x)), y: p.y } : { ...v, [d.kind === 'in' ? 'inY' : 'outY']: p.y })); }}
+        onPointerMove={e => { if (!drag.current) return; const p = position(e), d = drag.current; setPoints(old => old.map((v, i) => i !== d.index ? v : d.kind === 'point' ? { ...v, x: Math.max(old[i-1] ? old[i-1].x + .001 : -1e5, Math.min(old[i+1] ? old[i+1].x - .001 : 1e5, p.x)), y: p.y } : { ...v, [d.kind === 'in' ? 'inY' : 'outY']: p.y })); }}
         onPointerUp={e => { if (drag.current) e.currentTarget.releasePointerCapture(e.pointerId); drag.current = null; }}>
         <rect width="780" height="420" fill="#fafaf8" />
         <g transform={transform.toString()}>

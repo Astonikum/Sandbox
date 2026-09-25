@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync, mkdirSync, chmodSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, writeFileSync, mkdirSync, chmodSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
@@ -7,9 +7,7 @@ import { homedir } from "node:os";
 const root = dirname(fileURLToPath(import.meta.url));
 const out = resolve(root, "../frontend/public/engine");
 const inputs = [
-  "src/core.hpp",
-  "src/expression.hpp",
-  "src/wasm.cpp",
+  ...readdirSync(resolve(root, "src")).filter(name => /\.(hpp|cpp)$/.test(name)).sort().map(name => `src/${name}`),
   "build-wasm.mjs",
 ];
 const hash = createHash("sha256");
@@ -47,6 +45,7 @@ const exports = [
   "formulas",
   "reset",
   "tick",
+  "drag_point",
   "sample",
   "time",
   "body",
@@ -64,9 +63,10 @@ execFileSync(
   python,
   [
     compiler,
-    resolve(root, "src/wasm.cpp"),
+    ...inputs.filter(path => path.endsWith(".cpp") && path !== "src/main.cpp").map(path => resolve(root, path)),
     "-std=c++17",
     "-O3",
+    "-flto",
     "-fexceptions",
     "--no-entry",
     "-sMODULARIZE=1",
@@ -85,7 +85,7 @@ execFileSync(
   {
     stdio: "inherit",
     windowsHide: true,
-    env: { ...process.env, EM_CONFIG: resolve(sdk, ".emscripten") },
+    env: { ...process.env, EMSDK_PYTHON: python, EM_CONFIG: resolve(sdk, ".emscripten") },
   },
 );
 chmodSync(resolve(out, "physics.wasm"), 0o644);

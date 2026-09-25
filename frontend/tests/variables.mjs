@@ -4,6 +4,15 @@ import ts from 'typescript';
 const source = readFileSync(new URL('../src/variables.ts', import.meta.url), 'utf8');
 const url = 'data:text/javascript;base64,' + Buffer.from(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText).toString('base64');
 const { ensureVariables, bindingKey, bindableVariables, bindVariable, setVariable, syncVariables, removeVariable, saveVariable, valueAt, convertUnit, displayUnit, displayValue, unitChoices, knownUnit } = await import(url);
+const modelSource = readFileSync(new URL('../src/model.ts', import.meta.url), 'utf8');
+const modelUrl = 'data:text/javascript;base64,' + Buffer.from(ts.transpileModule(modelSource, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText).toString('base64');
+const { initial } = await import(modelUrl);
+const starting = ensureVariables(initial);
+const startingSymbol = (id, key) => starting.variables.find(v => v.id === starting.bindings[bindingKey(id, key)]).symbol;
+assert.equal(startingSymbol('1', 'x'), 'xпов');
+assert.equal(startingSymbol('2', 'x'), 'x1');
+assert.equal(startingSymbol('3', 'vector.magnitude'), 'aуск1');
+assert.deepEqual(ensureVariables(JSON.parse(JSON.stringify(starting))), starting);
 assert.equal(convertUnit(10, 'м/с', 'км/ч'), 36);
 assert.ok(Math.abs(convertUnit(Math.PI, 'рад', '°') - 180) < 1e-10);
 assert.deepEqual(unitChoices('Гц'), ['мкГц', 'мГц', 'Гц', 'кГц', 'МГц', 'ГГц']);
@@ -43,9 +52,9 @@ const gravity = key => s.variables.find(v => v.id === s.bindings[bindingKey('3',
 assert.equal(gravity('vector.magnitude').visible, true);
 assert.equal(gravity('vector.angle').visible, false);
 assert.equal(gravity('vector.x').visible, false);
-assert.equal(gravity('vector.magnitude').symbol, 'a1');
-assert.equal(gravity('vector.x').symbol, 'ax1');
-assert.equal(gravity('vector.y').symbol, 'ay1');
+assert.equal(gravity('vector.magnitude').symbol, 'aуск1');
+assert.equal(gravity('vector.x').symbol, 'axуск1');
+assert.equal(gravity('vector.y').symbol, 'ayуск1');
 assert.equal(gravity('vector.angle').value, 270);
 s = setVariable(s, gravity('vector.angle').id, 90);
 assert.ok(Math.abs(s.items[2].vector.y + 9.81) < 1e-10);
@@ -59,11 +68,38 @@ assert.ok(Math.abs(s.items[2].vector.y) < 1e-10);
 assert.equal(s.variables.find(v => v.id === s.bindings[bindingKey('1', 'x')]).symbol, 'x1');
 assert.equal(s.variables.find(v => v.id === s.bindings[bindingKey('2', 'x')]).symbol, 'x2');
 s = ensureVariables({ ...s, items: s.items.map(o => o.id === '3' ? { ...o, index: 12 } : o) });
-assert.equal(s.variables.find(v => v.id === s.bindings[bindingKey('3', 'vector.x')]).symbol, 'ax12');
+assert.equal(s.variables.find(v => v.id === s.bindings[bindingKey('3', 'vector.x')]).symbol, 'axуск12');
 const surface = { ...body('surface', 0), kind: 'surface', index: 1, w: 4, h: .15, fixed: true };
 const placed = ensureVariables({ version: 2, items: [surface, { ...body('rect', 1), index: 1 }] });
 assert.equal(placed.variables.find(v => v.id === placed.bindings[bindingKey('surface', 'x')]).visible, false);
-assert.equal(placed.variables.find(v => v.id === placed.bindings[bindingKey('rect', 'w')]).symbol, 'w2');
+assert.equal(placed.variables.find(v => v.id === placed.bindings[bindingKey('surface', 'x')]).symbol, 'xпов');
+assert.equal(placed.variables.find(v => v.id === placed.bindings[bindingKey('rect', 'w')]).symbol, 'w1');
+const oldSurface = { ...placed, variables: placed.variables.map(v => v.id === placed.bindings[bindingKey('surface', 'x')] ? { ...v, symbol: 'x1', auto: true } : v) };
+assert.equal(ensureVariables(oldSurface).variables.find(v => v.id === placed.bindings[bindingKey('surface', 'x')]).symbol, 'xпов');
+const manualSurface = { ...oldSurface, variables: oldSurface.variables.map(v => v.id === placed.bindings[bindingKey('surface', 'x')] ? { ...v, symbol: 'xруч', auto: false } : v) };
+assert.equal(ensureVariables(manualSurface).variables.find(v => v.id === placed.bindings[bindingKey('surface', 'x')]).symbol, 'xруч');
+const connector = (id, kind) => ({ id, index: 1, kind, x: 0, y: 0, w: 1, h: 1, angle: 0, fixed: false, ends: [null, null], length: 1, stiffness: 1, damping: 0, bindings: [] });
+const categorized = ensureVariables({ version: 2, items: [
+  { ...body('base', 1), index: 1 }, surface,
+  { ...body('lever', 1), kind: 'rod', index: 1 },
+  { ...body('wheel', 1), kind: 'pulley', index: 1 },
+  connector('hinge', 'bearing'), connector('spring', 'spring'), connector('thread', 'rope'),
+  ...['force', 'velocity', 'acceleration'].map(kind => ({ id: kind, index: 1, kind, vector: { x: 1, y: 0 }, scope: 'all', targets: [] })),
+] });
+const symbol = (scene, id, key) => scene.variables.find(v => v.id === scene.bindings[bindingKey(id, key)]).symbol;
+for (const [id, expected] of [['base', 'x1'], ['surface', 'xпов'], ['lever', 'xр1'], ['wheel', 'xбл1'], ['hinge', 'xпод1'], ['spring', 'xпр1'], ['thread', 'xн1']])
+  assert.equal(symbol(categorized, id, 'x'), expected);
+for (const [id, expected] of [['force', 'Fсил1'], ['velocity', 'vскор1'], ['acceleration', 'aуск1']])
+  assert.equal(symbol(categorized, id, 'vector.magnitude'), expected);
+const leverX = categorized.bindings[bindingKey('lever', 'x')], baseX = categorized.bindings[bindingKey('base', 'x')];
+const previousNames = { ...categorized, variables: categorized.variables.map(v => v.id === leverX ? { ...v, symbol: 'x2' } : v.id === baseX ? { ...v, symbol: 'xруч', auto: false } : v) };
+const renamed = ensureVariables(JSON.parse(JSON.stringify(previousNames)));
+assert.equal(symbol(renamed, 'lever', 'x'), 'xр1');
+assert.equal(symbol(renamed, 'base', 'x'), 'xруч');
+assert.equal(renamed.bindings[bindingKey('lever', 'x')], leverX);
+assert.equal(renamed.items.find(o => o.id === 'lever').index, 1);
+const collision = ensureVariables({ ...categorized, variables: [...categorized.variables.filter(v => v.id !== leverX), { id: 'v999', symbol: 'xр1', value: 0, unit: 'м', visible: true, auto: false }], bindings: Object.fromEntries(Object.entries(categorized.bindings).filter(([, id]) => id !== leverX)) });
+assert.equal(symbol(collision, 'lever', 'x'), 'xр1′');
 const x1 = placed.bindings[bindingKey('surface', 'x')], x2 = placed.bindings[bindingKey('rect', 'x')];
 assert.deepEqual(bindableVariables(placed, 'rect', 'x').map(v => v.id), [x2]);
 assert.throws(() => bindVariable(placed, 'rect', 'x', x1));

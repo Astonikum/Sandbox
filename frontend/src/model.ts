@@ -94,11 +94,13 @@ export const nextId = (items: Item[]) => {
   return String(n);
 };
 export const indexGroup = (o: Item) => o.kind === "circle" ? "rect" : o.kind;
-export const indexLabel = (o: Item) => String(o.index ?? o.id);
+export const indexLabel = (o: Item) => o.kind === "surface" ? "" : String(o.index ?? o.id);
+export const itemLabel = (o: Item) => names[o.kind] + (o.kind === "surface" ? "" : ` ${indexLabel(o)}`);
 // IDs remain stable references; indices are labels unique only within a category.
 export function numberScene(s: Scene): Scene {
   const used = new Map<Kind, Set<number>>();
   for (const o of s.items) {
+    if (o.kind === "surface") continue;
     const group = indexGroup(o);
     if (!used.has(group)) used.set(group, new Set());
     if (o.index === undefined) continue;
@@ -107,6 +109,12 @@ export function numberScene(s: Scene): Scene {
     used.get(group)!.add(o.index);
   }
   return { ...s, items: s.items.map((o) => {
+    if (o.kind === "surface") {
+      if (o.index === undefined) return o;
+      const surface = { ...o };
+      delete surface.index;
+      return surface;
+    }
     if (o.index !== undefined) return o;
     const group = used.get(indexGroup(o))!;
     let index = 1;
@@ -117,6 +125,7 @@ export function numberScene(s: Scene): Scene {
 }
 export function reindex(s: Scene, id: string, value: string): Scene {
   if (!/^[1-9][0-9]*$/.test(value)) throw Error("Индекс — целое число от 1");
+  if (s.items.some(o => o.id === id && o.kind === "surface")) throw Error("У поверхности нет индекса");
   return numberScene({ ...s, items: s.items.map(o => o.id === id ? { ...o, index: Number(value) } : o) });
 }
 export function make(kind: Kind, id: string, x = 0, y = 0): Item {

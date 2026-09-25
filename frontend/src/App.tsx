@@ -38,6 +38,8 @@ import {
   reindex,
   numberScene,
   indexLabel,
+  itemLabel,
+  local,
   validate,
 } from "./model";
 import type {
@@ -88,20 +90,20 @@ function Tool({
     </button>
   );
 }
-function InlineNumber({ label, value, disabled, onChange }: { label: string; value: number; disabled?: boolean; onChange: (value: number) => void }) {
+function InlineNumber({ label, value, disabled, onChange }: { label: string; value: number; disabled?: boolean; onChange: (value: number) => boolean }) {
   const [draft, setDraft] = useState(format(value));
   const [bad, setBad] = useState(false);
   const focused = useRef(false);
   useEffect(() => { if (!focused.current) { setDraft(format(value)); setBad(false); } }, [value]);
   return <input className={bad ? 'invalid' : ''} aria-label={label} aria-invalid={bad} value={draft} readOnly={disabled} inputMode="decimal"
     onFocus={() => { focused.current = true; }} onChange={e => { setDraft(e.target.value); setBad(false); }}
-    onBlur={() => { focused.current = false; const n = Number(draft.replace(',', '.')); if (!draft.trim() || !Number.isFinite(n)) { setBad(true); return; } if (n !== value) onChange(n); }}
+    onBlur={() => { focused.current = false; const n = Number(draft.replace(',', '.')); if (!draft.trim() || !Number.isFinite(n) || (n !== value && !onChange(n))) { setDraft(format(value)); setBad(true); } }}
     onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') { setDraft(format(value)); setBad(false); e.currentTarget.blur(); } }} />;
 }
 function Symbol({ value }: { value: string }) { return <span className="symbol">{value[0]}<sub>{value.slice(1)}</sub></span>; }
-function UnitSelect({ variable, onChange }: { variable: Variable; onChange: (unit: string) => void }) {
+function UnitSelect({ variable, disabled = false, onChange }: { variable: Variable; disabled?: boolean; onChange: (unit: string) => void }) {
   const options = unitChoices(variable.unit);
-  return options.length > 1 ? <select className="unit-select" aria-label={`Единица ${variable.symbol}`} title="Единица измерения" value={displayUnit(variable)} onChange={e => onChange(e.target.value)}>{options.map(unit => <option key={unit} value={unit}>{unit}</option>)}</select> : <small className="unit-static">{variable.unit}</small>;
+  return options.length > 1 ? <select className="unit-select" aria-label={`Единица ${variable.symbol}`} title="Единица измерения" value={displayUnit(variable)} disabled={disabled} onChange={e => onChange(e.target.value)}>{options.map(unit => <option key={unit} value={unit}>{unit}</option>)}</select> : <small className="unit-static">{variable.unit}</small>;
 }
 function UnitCombobox({ value, onChange }: { value: string; onChange: (unit: string) => void }) {
   const search = value.replace(/[HhNn]/g, 'Н');
@@ -194,7 +196,7 @@ export default function App() {
     state = useRef({ selected, grid, pending, running, showAuto }),
     hover = useRef<string | null>(null),
     space = useRef(false),
-    drag = useRef<{ id: string; x: number; y: number } | null>(null);
+    drag = useRef<{ id: string; x: number; y: number; local: Vec } | null>(null);
   const gesture = useRef<{
     type: "pan" | "move" | "resize" | "rotate";
     id?: string;
@@ -252,12 +254,16 @@ export default function App() {
             else if (field.key.startsWith('velocity.')) continue;
             else changed[field.key] = readField(o, field.key);
           }
+          if (body(o) && body(prior) && JSON.stringify(o.trajectory) !== JSON.stringify(prior.trajectory)) changed.trajectory = o.trajectory;
+          if (effect(o) && effect(prior) && o.gravity !== prior.gravity) changed.gravity = o.gravity;
           if (Object.keys(changed).length) simulation.current?.edit(o.id, changed);
         }
       }
       commit(s);
+      return true;
     } catch (e) {
       tell(e instanceof Error ? e.message : "Неверные параметры", true);
+      return false;
     }
   };
   const undo = (redo = false) => {
@@ -415,7 +421,7 @@ export default function App() {
   };
   const snap = (v: number) => (grid ? Math.round(v * 10) / 10 : v);
   const add = (kind: Kind, p?: Vec) => {
-    if (running) return;
+    if (running || pending) return;
     const at = p || { x: camera.current.x, y: camera.current.y };
     if (["force", "velocity", "acceleration"].includes(kind)) {
       const found = p
@@ -513,7 +519,7 @@ export default function App() {
       if (o) {
         setSelected(o.id);
         if (body(o) && !o.fixed && !o.trajectory)
-          drag.current = { id: o.id, ...p };
+          drag.current = { id: o.id, ...p, local: local(o, p) };
       } else setSelected(null);
       return;
     }
@@ -641,6 +647,10 @@ export default function App() {
       tell("Добавьте тело", true);
       return;
     }
+    setEditVariable(null);
+    setEditRange(null);
+    setEditGraph(null);
+    setVariableMenu(null);
     snapshot.current = structuredClone(current.current);
     setRunning(true);
     setBusy(true);
@@ -701,20 +711,10 @@ export default function App() {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
   const registryChange = (value: Scene | (() => Scene)) => {
+    if (running || simulation.current) return false;
     try {
       const next = typeof value === 'function' ? value() : value;
       validate(next);
-      if (running) for (const o of next.items) {
-        const prior = current.current.items.find(p => p.id === o.id);
-        if (!prior) continue;
-        const patch: Patch = {};
-        for (const field of fields(o)) if (readField(o, field.key) !== readField(prior, field.key)) {
-          if (field.key.startsWith('vector.')) patch.vector = (o as Effect).vector;
-          else if (field.key.startsWith('velocity.')) continue;
-          else patch[field.key] = readField(o, field.key);
-        }
-        if (Object.keys(patch).length) simulation.current?.edit(o.id, patch);
-      }
       commit(next);
       return true;
     } catch (e) { tell(e instanceof Error ? e.message : String(e), true); return false; }
@@ -761,14 +761,14 @@ export default function App() {
           {(computed ? [variable] : compatible).map(v => <option key={v.id} value={v.id}>{v.symbol}</option>)}
         </select>
       </span>
-      <button className="visibility-button" title={variable.visible ? 'Скрыть в списке переменных' : 'Показать в списке переменных'} aria-label={`${variable.visible ? 'Скрыть' : 'Показать'} ${variable.symbol}`} aria-pressed={variable.visible} onClick={() => updateVariable(id!, { visible: !variable.visible, visibilityLocked: true })}>{variable.visible ? <EyeIcon /> : <EyeSlashIcon />}</button>
-      <InlineNumber label={label} value={key.endsWith('.angle') && readField(shown, key.replace('.angle', '.magnitude')) === 0 ? displayValue(variable) : convertUnit(readField(shown, key), unit, displayUnit(variable))} disabled={disabled || computed} onChange={n => {
+      <button className="visibility-button" title={variable.visible ? 'Скрыть в списке переменных' : 'Показать в списке переменных'} aria-label={`${variable.visible ? 'Скрыть' : 'Показать'} ${variable.symbol}`} aria-pressed={variable.visible} disabled={running} onClick={() => updateVariable(id!, { visible: !variable.visible, visibilityLocked: true })}>{variable.visible ? <EyeIcon /> : <EyeSlashIcon />}</button>
+      <InlineNumber label={label} value={key.endsWith('.angle') && readField(shown, key.replace('.angle', '.magnitude')) === 0 ? displayValue(variable) : convertUnit(readField(shown, key), unit, displayUnit(variable))} disabled={disabled || computed || (running && (key.startsWith('vector.') || key.startsWith('velocity.') || key === 'vx' || key === 'vy'))} onChange={n => {
         const physical = convertUnit(n, displayUnit(variable), unit);
-        if (physical < min || physical > max) { tell(`${label}: число от ${min} до ${max} ${unit}`, true); return; }
-        if (key.startsWith('vector.') || key.startsWith('velocity.') || key === 'vx' || key === 'vy') registryChange(() => setVariable(current.current, id!, convertUnit(n, displayUnit(variable), variable.unit)));
-        else change(chosen!.id, { [key]: physical, ...(geo(chosen!) && ['circle', 'pulley', 'bearing'].includes(chosen!.kind) && key === 'w' ? { h: physical } : {}) });
+        if (physical < min || physical > max) { tell(`${label}: число от ${min} до ${max} ${unit}`, true); return false; }
+        if (key.startsWith('vector.') || key.startsWith('velocity.') || key === 'vx' || key === 'vy') return registryChange(() => setVariable(current.current, id!, convertUnit(n, displayUnit(variable), variable.unit)));
+        return change(chosen!.id, { [key]: physical, ...(geo(chosen!) && ['circle', 'pulley', 'bearing'].includes(chosen!.kind) && key === 'w' ? { h: physical } : {}) });
       }} />
-      <UnitSelect variable={variable} onChange={unit => updateVariable(id!, { displayUnit: unit })} />
+      <UnitSelect variable={variable} disabled={running} onChange={unit => updateVariable(id!, { displayUnit: unit })} />
     </div>;
   };
   return (
@@ -885,7 +885,7 @@ export default function App() {
                       ? "Свободное падение"
                       : names[o.kind]}
                   </span>
-                  <i>{indexLabel(o)}</i>
+                  {o.kind !== "surface" && <i>{indexLabel(o)}</i>}
                 </button>
               ))}
             </div>
@@ -1003,7 +1003,7 @@ export default function App() {
                         }
                         onChange={() => choose(b.id)}
                       />
-                      {names[b.kind]} {indexLabel(b)}
+                      {itemLabel(b)}
                     </label>
                   ))}
                 </div>
@@ -1012,7 +1012,7 @@ export default function App() {
                   <div className="property-title">
                     <ComponentIcon kind={chosen.kind} />
                     <span>{names[chosen.kind]}</span>
-                    <input
+                    {chosen.kind !== "surface" && <input
                       className="index-input"
                       aria-label="Индекс"
                       key={chosen.id + ":" + chosen.index}
@@ -1037,7 +1037,7 @@ export default function App() {
                       onKeyDown={(e) => {
                         if (e.key === "Enter") e.currentTarget.blur();
                       }}
-                    />
+                    />}
                   </div>
                   {effect(chosen) ? (
                     <>
@@ -1053,7 +1053,7 @@ export default function App() {
                           : chosen.targets
                               .map(
                                 (id) =>
-                                  `${names[scene.items.find((o) => o.id === id)!.kind]} ${indexLabel(scene.items.find((o) => o.id === id)!)}`,
+                                  itemLabel(scene.items.find((o) => o.id === id)!),
                               )
                               .join(", ")}
                       </div>
@@ -1162,7 +1162,7 @@ export default function App() {
                           {chosen.trajectory && (
                             <div className="formulas">
                               {(["x", "y", "angle"] as const).map((key) => (
-                                <label key={chosen.id + key}>
+                                <label key={`${chosen.id}:${key}:${chosen.trajectory![key]}`}>
                                   <span>{key === "angle" ? "φ" : key}(t)</span>
                                   <input
                                     aria-label={`${key}(t)`}
@@ -1258,13 +1258,7 @@ export default function App() {
                                 <div key={i}>
                                   <span>
                                     Конец {i + 1} →{" "}
-                                    {
-                                      names[
-                                        scene.items.find((o) => o.id === a.id)!
-                                          .kind
-                                      ]
-                                    }{" "}
-                                    {indexLabel(scene.items.find((o) => o.id === a.id)!)}
+                                    {itemLabel(scene.items.find((o) => o.id === a.id)!)}
                                   </span>
                                   <Tool
                                     label={`Отсоединить конец ${i + 1}`}
@@ -1287,16 +1281,10 @@ export default function App() {
                             chosen.bindings.map((a, i) => (
                               <div key={i}>
                                 <span>
-                                  {
-                                    names[
-                                      scene.items.find((o) => o.id === a.id)!
-                                        .kind
-                                    ]
-                                  }{" "}
-                                  {indexLabel(scene.items.find((o) => o.id === a.id)!)}
+                                  {itemLabel(scene.items.find((o) => o.id === a.id)!)}
                                 </span>
                                 <Tool
-                                  label={`Отсоединить тело ${indexLabel(scene.items.find((o) => o.id === a.id)!)}`}
+                                  label={`Отсоединить ${itemLabel(scene.items.find((o) => o.id === a.id)!)}`}
                                   disabled={running}
                                   onClick={() =>
                                     change(chosen.id, {
@@ -1324,23 +1312,23 @@ export default function App() {
               {scene.variables?.filter(v => v.visible).map(v => <div className="variable-card" key={v.id}>
                 <div className="variable-card-line">
                   <Symbol value={v.symbol} />
-                  <InlineNumber label={`Переменная ${v.symbol}`} value={displayValue(v, observedScene.variables?.find(x => x.id === v.id)?.value ?? v.value)} disabled={!!v.derived} onChange={n => registryChange(() => setVariable(current.current, v.id, convertUnit(n, displayUnit(v), v.unit)))} />
-                  <UnitSelect variable={v} onChange={unit => updateVariable(v.id, { displayUnit: unit })} />
-                  <button className="variable-menu-trigger" aria-label={`Действия с ${v.symbol}`} aria-haspopup="menu" aria-expanded={variableMenu?.id === v.id} title="Действия" onClick={e => {
+                  <InlineNumber label={`Переменная ${v.symbol}`} value={displayValue(v, observedScene.variables?.find(x => x.id === v.id)?.value ?? v.value)} disabled={running || !!v.derived} onChange={n => registryChange(() => setVariable(current.current, v.id, convertUnit(n, displayUnit(v), v.unit)))} />
+                  <UnitSelect variable={v} disabled={running} onChange={unit => updateVariable(v.id, { displayUnit: unit })} />
+                  <button className="variable-menu-trigger" aria-label={`Действия с ${v.symbol}`} aria-haspopup="menu" aria-expanded={variableMenu?.id === v.id} title="Действия" disabled={running} onClick={e => {
                     if (variableMenu?.id === v.id) return setVariableMenu(null);
                     const rect = e.currentTarget.getBoundingClientRect();
                     setVariableMenu({ id: v.id, left: Math.max(8, Math.min(rect.right - 180, window.innerWidth - 188)), top: rect.bottom + 204 <= window.innerHeight ? rect.bottom + 4 : Math.max(8, rect.top - 204) });
                   }}><DotsThreeIcon /></button>
                 </div>
-                {v.range && <div className="variable-range"><input type="range" aria-label={`Диапазон ${v.symbol}`} min={v.range.min} max={v.range.max} step={v.range.step} value={Math.max(v.range.min, Math.min(v.range.max, v.value))} onChange={e => registryChange(() => setVariable(current.current, v.id, Number(e.target.value)))} /><button onClick={() => setEditRange(v.id)} title="Редактировать range">✎</button></div>}
-                {v.graph && <button className="graph-link" onClick={() => setEditGraph(v.id)}>График зависимости ↗</button>}
+                {v.range && <div className="variable-range"><input type="range" aria-label={`Диапазон ${v.symbol}`} min={v.range.min} max={v.range.max} step={v.range.step} value={Math.max(v.range.min, Math.min(v.range.max, v.value))} disabled={running} onChange={e => registryChange(() => setVariable(current.current, v.id, Number(e.target.value)))} /><button disabled={running} onClick={() => setEditRange(v.id)} title="Редактировать range">✎</button></div>}
+                {v.graph && <button className="graph-link" disabled={running} onClick={() => setEditGraph(v.id)}>График зависимости ↗</button>}
               </div>)}
               {!scene.variables?.some(v => v.visible) && <p className="variables-empty">Покажите переменные кнопкой глаза в свойствах.</p>}
             </div>
           </section>
         </aside>
       </main>
-      {variableMenu && menuVariable && createPortal(<div className="variable-menu-layer">
+      {!running && variableMenu && menuVariable && createPortal(<div className="variable-menu-layer">
         <div className="variable-menu-dismiss" onClick={() => setVariableMenu(null)} />
         <div className="variable-menu-items" role="menu" style={{ left: variableMenu.left, top: variableMenu.top }} onClick={() => setVariableMenu(null)}>
           <button role="menuitem" onClick={() => { const all = current.current.variables || []; const nextId = `v${Math.max(0, ...all.map(x => Number(x.id.slice(1)) || 0)) + 1}`; const match = menuVariable.symbol.match(/^(.*?)(\d+)$/), prefix = match?.[1] || menuVariable.symbol; let index = Number(match?.[2]) || 1; while (all.some(x => x.symbol === `${prefix}${index}`)) index++; registryChange({ ...current.current, variables: [...all, { ...menuVariable, id: nextId, symbol: `${prefix}${index}`, auto: false, graph: menuVariable.graph ? structuredClone(menuVariable.graph) : undefined }] }); }}>Дублировать</button>
@@ -1351,12 +1339,12 @@ export default function App() {
           {menuVariable.graph && <button role="menuitem" onClick={() => updateVariable(menuVariable.id, { graph: undefined })}>Убрать график</button>}
         </div>
       </div>, document.body)}
-      {editVariable && <VariableEditor key={editVariable} variable={scene.variables?.find(v => v.id === editVariable)} suggestedSymbol={newSymbol(scene.variables)} onClose={() => setEditVariable(null)} onSave={draft => {
+      {!running && editVariable && <VariableEditor key={editVariable} variable={scene.variables?.find(v => v.id === editVariable)} suggestedSymbol={newSymbol(scene.variables)} onClose={() => setEditVariable(null)} onSave={draft => {
         try { return registryChange(saveVariable(current.current, { ...draft, ...(editVariable === 'new' ? {} : { id: editVariable }) })) ? null : 'Не удалось сохранить переменную'; }
         catch (error) { return error instanceof Error ? error.message : String(error); }
       }} />}
-      {editRange && scene.variables?.find(v => v.id === editRange) && <RangeEditor key={editRange} variable={scene.variables.find(v => v.id === editRange)!} onClose={() => setEditRange(null)} onSave={range => { updateVariable(editRange, { range }); setEditRange(null); }} onRemove={() => { updateVariable(editRange, { range: undefined }); setEditRange(null); }} />}
-      {editGraph && scene.variables?.find(v => v.id === editGraph) && <GraphEditor key={editGraph} variable={scene.variables.find(v => v.id === editGraph)!} variables={scene.variables} onClose={() => setEditGraph(null)} onSave={graph => { if (updateVariable(editGraph, { graph })) setEditGraph(null); }} />}
+      {!running && editRange && scene.variables?.find(v => v.id === editRange) && <RangeEditor key={editRange} variable={scene.variables.find(v => v.id === editRange)!} onClose={() => setEditRange(null)} onSave={range => { updateVariable(editRange, { range }); setEditRange(null); }} onRemove={() => { updateVariable(editRange, { range: undefined }); setEditRange(null); }} />}
+      {!running && editGraph && scene.variables?.find(v => v.id === editGraph) && <GraphEditor key={editGraph} variable={scene.variables.find(v => v.id === editGraph)!} variables={scene.variables} onClose={() => setEditGraph(null)} onSave={graph => { if (updateVariable(editGraph, { graph })) setEditGraph(null); }} />}
       <input
         ref={file}
         type="file"

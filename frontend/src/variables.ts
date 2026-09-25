@@ -93,7 +93,15 @@ export function writeField(o: Item, key: string, value: number): Item {
 function freshId(variables: Variable[]) { let n = 1; while (variables.some(v => v.id === `v${n}`)) n++; return `v${n}`; }
 function symbolBase(field: Field) { return field.letter + (field.key === 'vector.x' || field.key === 'vx' || (field.computed && Number(field.key.slice(8)) < 18 && Number(field.key.slice(8)) % 2 === 0) ? 'x' : field.key === 'vector.y' || field.key === 'vy' || (field.computed && Number(field.key.slice(8)) < 18) ? 'y' : ''); }
 const symbolIndex = (o: Item) => Number(o.index ?? o.id) || 1;
-function freshSymbol(symbols: Set<string>, prefix: string, start: number) { let n = start; while (symbols.has(`${prefix}${n}`)) n++; const symbol = `${prefix}${n}`; symbols.add(symbol); return symbol; }
+const categorySymbol: Record<Item['kind'], string> = {
+  rect: '', circle: '', surface: 'пов', rod: 'р', bearing: 'под', pulley: 'бл',
+  spring: 'пр', rope: 'н', force: 'сил', velocity: 'скор', acceleration: 'уск',
+};
+function freshSymbol(symbols: Set<string>, preferred: string) { let symbol = preferred; while (symbols.has(symbol)) symbol += '′'; symbols.add(symbol); return symbol; }
+function automaticSymbol(symbols: Set<string>, o: Item, field: Field) {
+  const preferred = `${symbolBase(field)}${categorySymbol[o.kind]}${o.kind === 'surface' ? '' : symbolIndex(o)}`;
+  return freshSymbol(symbols, preferred);
+}
 const defaultVisible = (o: Item, field: Field) =>
   (o.kind !== 'surface' && field.key === 'mass') || field.key === 'vector.magnitude';
 const autoPublic = (field: Field) =>
@@ -107,7 +115,8 @@ export function ensureVariables(scene: VariableScene): VariableScene {
   const automatic = new Set(ordered.flatMap(({ o, field }) => {
     const id = bindings[bindingKey(o.id, field.key)], v = variables[indices.get(id) ?? -1];
     const legacy = `${symbolBase(field)}${o.id}`;
-    return v && (v.auto || (v.auto === undefined && (v.symbol === legacy || new RegExp(`^${legacy}[2-9][0-9]*$`).test(v.symbol)))) ? [id] : [];
+    const oldIndex = o.kind === 'surface' && o.index !== undefined ? `${symbolBase(field)}${o.index}` : legacy;
+    return v && (v.auto || (v.auto === undefined && (v.symbol === legacy || v.symbol === oldIndex || new RegExp(`^${legacy}[2-9][0-9]*$`).test(v.symbol)))) ? [id] : [];
   }));
   const symbols = new Set(variables.filter(v => !automatic.has(v.id)).map(v => v.symbol));
   const assigned = new Set<string>();
@@ -117,7 +126,7 @@ export function ensureVariables(scene: VariableScene): VariableScene {
     if (bindings[key] && ids.has(bindings[key])) {
       const index = indices.get(bindings[key]) ?? -1;
       if (index >= 0 && automatic.has(bindings[key]) && !assigned.has(bindings[key])) {
-        variables[index] = { ...variables[index], symbol: freshSymbol(symbols, symbolBase(field), symbolIndex(o)), auto: true };
+        variables[index] = { ...variables[index], symbol: automaticSymbol(symbols, o, field), auto: true };
         assigned.add(bindings[key]);
       }
       if (index >= 0 && automatic.has(bindings[key]) && !variables[index].visibilityLocked)
@@ -127,7 +136,7 @@ export function ensureVariables(scene: VariableScene): VariableScene {
     const value = readField(o, field.key);
     if (!Number.isFinite(value)) continue;
     const id = `v${next++}`;
-    const symbol = freshSymbol(symbols, symbolBase(field), symbolIndex(o));
+    const symbol = automaticSymbol(symbols, o, field);
     variables.push({ id, symbol, value, unit: field.unit, visible: defaultVisible(o, field), auto: true, ...(field.computed ? { derived: { itemId: o.id, index: Number(field.key.slice(8)) } } : {}) });
     indices.set(id, variables.length - 1);
     ids.add(id);
@@ -255,7 +264,7 @@ export function removeVariable(scene: VariableScene, id: string): VariableScene 
     const key = bindingKey(o.id, field.key);
     if (bindings[key] !== id) continue;
     const next = freshId(variables);
-    variables = [...variables, { id: next, symbol: freshSymbol(new Set(variables.map(v => v.symbol)), symbolBase(field), symbolIndex(o)), value: readField(o, field.key), unit: field.unit, visible: false, auto: true, ...(field.computed ? { derived: { itemId: o.id, index: Number(field.key.slice(8)) } } : {}) }];
+    variables = [...variables, { id: next, symbol: automaticSymbol(new Set(variables.map(v => v.symbol)), o, field), value: readField(o, field.key), unit: field.unit, visible: false, auto: true, ...(field.computed ? { derived: { itemId: o.id, index: Number(field.key.slice(8)) } } : {}) }];
     bindings[key] = next;
   }
   variables = variables.map(v => v.graph?.source === id ? { ...v, graph: undefined } : v);
