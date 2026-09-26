@@ -3,6 +3,8 @@
 #include <map>
 
 struct ContactState {
+  ContactState() = default;
+
   Vec2 normal{}, points[2]{}, offsetA[2]{}, offsetB[2]{};
   Vec2 frictionOffsetA{}, frictionOffsetB{};
   double bounceVelocity[2]{}, normalImpulse[2]{};
