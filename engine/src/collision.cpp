@@ -50,7 +50,7 @@ ContactManifold buildManifold(const Body &bodyA, const Body &bodyB, Vec2 normal)
   double lower = std::max(intervalA.first, intervalB.first),
          upper = std::min(intervalA.second, intervalB.second);
   if (lower > upper + 1e-6)
-    return {};
+    return ContactManifold();
   int contacts = upper - lower > 1e-6 ? 2 : 1;
   ContactManifold manifold;
   manifold.normal = normal;
@@ -77,7 +77,7 @@ ContactManifold buildManifold(const Body &bodyA, const Body &bodyB, Vec2 normal)
     ++manifold.count;
   }
   if (!manifold.count)
-    return {};
+    return ContactManifold();
   Vec2 center =
       manifold.count == 2 ? (manifold.points[0] + manifold.points[1]) * .5 : manifold.points[0];
   manifold.frictionOffsetA = center - bodyA.position;
