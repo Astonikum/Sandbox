@@ -1,18 +1,19 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Sandbox",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "identifier": "com.astonikum.sandbox",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:8080",
     "beforeDevCommand": "npm run dev",
-    "beforeBuildCommand": "npm run build"
+    "beforeBuildCommand": "npm run build",
+    "beforeBundleCommand": "sh scripts/compile-macos-icon.sh"
   },
   "app": {
     "windows": [
       {
-        "title": "Механика — физическая песочница",
+        "title": "Sandbox [0.3.0]",
         "width": 800,
         "height": 600,
         "dragDropEnabled": false,
@@ -34,6 +35,13 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "macOS": {
+      "files": {
+        "Resources/Assets.car": "icons/macos/Assets.car",
+        "Resources/Sandbox.icns": "icons/macos/Sandbox.icns"
+      },
+      "infoPlist": "icons/macos/Info.plist"
+    },
     "android": {
       "debugApplicationIdSuffix": ".debug"
     }

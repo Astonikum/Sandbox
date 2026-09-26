@@ -1,24 +1,49 @@
 import { useEffect, useRef, useState } from "react";
-import { useCombobox } from "downshift";
-import type { PointerEvent as PE, ReactNode } from "react";
-import { createPortal } from "react-dom";
+import type { CSSProperties, PointerEvent as PE, ReactNode } from "react";
+import {
+  Checkbox as AriaCheckbox,
+  ComboBox,
+  Dialog,
+  Disclosure,
+  DisclosurePanel,
+  FileTrigger,
+  Form,
+  Group as AriaGroup,
+  Heading,
+  Input as AriaInput,
+  Label,
+  ListBox,
+  ListBoxItem as ComboBoxItem,
+  Modal,
+  ModalOverlay,
+  Popover,
+  Slider,
+  SliderThumb,
+  SliderTrack,
+  Tooltip,
+  TooltipTrigger,
+} from "react-aria-components";
 import { FolderOpenIcon } from "@phosphor-icons/react/dist/csr/FolderOpen";
-import { DownloadSimpleIcon } from "@phosphor-icons/react/dist/csr/DownloadSimple";
+import { FloppyDiskIcon } from "@phosphor-icons/react/dist/csr/FloppyDisk";
 import { ArrowCounterClockwiseIcon } from "@phosphor-icons/react/dist/csr/ArrowCounterClockwise";
 import { ArrowClockwiseIcon } from "@phosphor-icons/react/dist/csr/ArrowClockwise";
-import { FlowArrowIcon } from "@phosphor-icons/react/dist/csr/FlowArrow";
 import { GridFourIcon } from "@phosphor-icons/react/dist/csr/GridFour";
-import { CrosshairSimpleIcon } from "@phosphor-icons/react/dist/csr/CrosshairSimple";
+import { CornersOutIcon } from "@phosphor-icons/react/dist/csr/CornersOut";
+import { ArrowDownIcon } from "@phosphor-icons/react/dist/csr/ArrowDown";
+import { CursorIcon } from "@phosphor-icons/react/dist/csr/Cursor";
+import { SlidersHorizontalIcon } from "@phosphor-icons/react/dist/csr/SlidersHorizontal";
+import { ChartLineIcon } from "@phosphor-icons/react/dist/csr/ChartLine";
+import { NumberSquareOneIcon } from "@phosphor-icons/react/dist/csr/NumberSquareOne";
+import { CopySimpleIcon } from "@phosphor-icons/react/dist/csr/CopySimple";
 import { PlayIcon } from "@phosphor-icons/react/dist/csr/Play";
 import { StopIcon } from "@phosphor-icons/react/dist/csr/Stop";
-import { ScalesIcon } from "@phosphor-icons/react/dist/csr/Scales";
 import { TrashIcon } from "@phosphor-icons/react/dist/csr/Trash";
 import { FileIcon } from "@phosphor-icons/react/dist/csr/File";
 import { CheckIcon } from "@phosphor-icons/react/dist/csr/Check";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
+import { ListBulletsIcon } from "@phosphor-icons/react/dist/csr/ListBullets";
 import { EyeIcon } from "@phosphor-icons/react/dist/csr/Eye";
 import { EyeSlashIcon } from "@phosphor-icons/react/dist/csr/EyeSlash";
-import { DotsThreeIcon } from "@phosphor-icons/react/dist/csr/DotsThree";
 import { PlusIcon } from "@phosphor-icons/react/dist/csr/Plus";
 import { LockSimpleIcon } from "@phosphor-icons/react/dist/csr/LockSimple";
 import { CircleNotchIcon } from "@phosphor-icons/react/dist/csr/CircleNotch";
@@ -41,6 +66,7 @@ import {
   itemLabel,
   local,
   validate,
+  serializeProject,
 } from "./model";
 import type {
   Item,
@@ -57,10 +83,37 @@ import type { Metrics } from "./simulation";
 import { paint, fit, fromScreen, hit, handles, resized, rotationHandle, rotated } from "./render";
 import type { Camera } from "./render";
 import { ComponentIcon } from "./ComponentIcon";
-import { allowedUnits, bindableVariables, bindVariable, bindingKey, convertUnit, derivedFields, displayUnit, displayValue, ensureVariables, fields, knownUnit, readField, removeVariable, saveVariable, setVariable, syncVariables, unitChoices } from './variables';
+import { allowedUnits, bindableVariables, bindVariable, bindingKey, convertUnit, derivedFields, displayUnit, displayValue, ensureVariables, fields, knownUnit, readField, removeVariable, saveVariable, setVariable, syncVariables, unitChoices, variableMode } from './variables';
 import type { Variable } from './variables';
-import { GraphEditor } from './GraphEditor';
+import { GraphEditor, VariableGraph } from './GraphEditor';
+import { Button as AppButton, SelectControl } from './ui';
 import "./App.css";
+
+type ToolKind = Kind | "select";
+const toolShortcuts: Record<ToolKind, string> = {
+  select: "V", rect: "R", circle: "C", bearing: "B", spring: "S", rope: "T",
+  pulley: "P", force: "F", acceleration: "A", velocity: "U", surface: "H", rod: "L",
+};
+const toolDescriptions: Record<Kind, string> = {
+  rect: "Добавить прямоугольное тело", circle: "Добавить круглое тело", bearing: "Добавить опору",
+  spring: "Соединить тела пружиной", rope: "Соединить тела нитью", pulley: "Добавить блок",
+  force: "Добавить силу и выбрать тела", acceleration: "Добавить ускорение телам",
+  velocity: "Задать начальную скорость", surface: "Добавить поверхность", rod: "Добавить рычаг",
+};
+const panelMinimums = { left: 180, right: 200 } as const;
+const panelMaximums = { left: 460, right: 480 } as const;
+function fitPanelWidths(preferences: { left: number; right: number }, layoutWidth: number) {
+  const widths = { ...preferences };
+  let excess = widths.left + widths.right - Math.max(panelMinimums.left + panelMinimums.right, layoutWidth - 390);
+  if (excess > 0) {
+    for (const panel of ["right", "left"] as const) {
+      const reduction = Math.min(excess, widths[panel] - panelMinimums[panel]);
+      widths[panel] -= reduction;
+      excess -= reduction;
+    }
+  }
+  return widths;
+}
 const format = (n: number) => Number(n.toPrecision(6)).toString();
 function Tool({
   label,
@@ -69,33 +122,81 @@ function Tool({
   disabled = false,
   active = false,
   className = "",
+  tooltip,
+  shortcut,
 }: {
   label: string;
   children: ReactNode;
-  onClick: () => void;
+  onClick?: () => void;
   disabled?: boolean;
   active?: boolean;
   className?: string;
+  tooltip?: string;
+  shortcut?: string;
 }) {
-  return (
-    <button
+  const button = (
+    <AppButton
       className={`tool ${active ? "active" : ""} ${className}`}
-      title={label}
+      title={tooltip ? undefined : label}
       aria-label={label}
       aria-pressed={active}
       onClick={onClick}
       disabled={disabled}
     >
       {children}
-    </button>
+    </AppButton>
   );
+  return tooltip ? <TooltipTrigger delay={350}>
+    {button}
+    <Tooltip className="tool-tooltip toolbar-tooltip" placement="bottom">
+      <strong>{label}{shortcut && <kbd>{shortcut}</kbd>}</strong>
+      <span>{tooltip}</span>
+    </Tooltip>
+  </TooltipTrigger> : button;
+}
+function CanvasToolButton({ label, description, shortcut, active, disabled, onClick, children }: {
+  label: string;
+  description: string;
+  shortcut: string;
+  active: boolean;
+  disabled: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const show = () => {
+    if (hoverTimer.current) clearTimeout(hoverTimer.current);
+    hoverTimer.current = setTimeout(() => setOpen(true), 400);
+  };
+  const hide = () => {
+    if (hoverTimer.current) clearTimeout(hoverTimer.current);
+    hoverTimer.current = null;
+    setOpen(false);
+  };
+  useEffect(() => () => { if (hoverTimer.current) clearTimeout(hoverTimer.current); }, []);
+  return <TooltipTrigger isOpen={open} onOpenChange={setOpen} delay={400}>
+    <AppButton className={`canvas-tool ${active ? "active" : ""}`} aria-label={label} aria-pressed={active} disabled={disabled} onClick={onClick} onHoverStart={show} onHoverEnd={hide}>
+      {children}
+    </AppButton>
+    <Tooltip className="tool-tooltip" placement="right"><strong>{label} <kbd>{shortcut}</kbd></strong><span>{description}</span></Tooltip>
+  </TooltipTrigger>;
+}
+function ResizeHandle({ name, width, min, max, reverse = false, className = "", onResize }: { name: string; width: number; min: number; max: number; reverse?: boolean; className?: string; onResize: (width: number) => void }) {
+  const drag = useRef<{ x: number; width: number } | null>(null);
+  const resize = (value: number) => onResize(Math.max(min, Math.min(max, value)));
+  return <div className={`resize-handle ${className}`} role="separator" aria-orientation="vertical" aria-label={`Изменить ширину: ${name}`} aria-valuemin={min} aria-valuemax={max} aria-valuenow={Math.round(width)} tabIndex={0}
+    onPointerDown={e => { e.preventDefault(); drag.current = { x: e.clientX, width }; e.currentTarget.setPointerCapture(e.pointerId); }}
+    onPointerMove={e => { if (drag.current) resize(drag.current.width + (e.clientX - drag.current.x) * (reverse ? -1 : 1)); }}
+    onPointerUp={() => { drag.current = null; }} onPointerCancel={() => { drag.current = null; }}
+    onKeyDown={e => { if (e.key === "ArrowLeft" || e.key === "ArrowRight") { e.preventDefault(); const step = e.key === "ArrowRight" ? 12 : -12; resize(width + step * (reverse ? -1 : 1)); } }} />;
 }
 function InlineNumber({ label, value, disabled, onChange }: { label: string; value: number; disabled?: boolean; onChange: (value: number) => boolean }) {
   const [draft, setDraft] = useState(format(value));
   const [bad, setBad] = useState(false);
   const focused = useRef(false);
   useEffect(() => { if (!focused.current) { setDraft(format(value)); setBad(false); } }, [value]);
-  return <input className={bad ? 'invalid' : ''} aria-label={label} aria-invalid={bad} value={draft} readOnly={disabled} inputMode="decimal"
+  return <AriaInput className={bad ? 'invalid' : ''} aria-label={label} aria-invalid={bad} value={draft} readOnly={disabled} inputMode="decimal"
     onFocus={() => { focused.current = true; }} onChange={e => { setDraft(e.target.value); setBad(false); }}
     onBlur={() => { focused.current = false; const n = Number(draft.replace(',', '.')); if (!draft.trim() || !Number.isFinite(n) || (n !== value && !onChange(n))) { setDraft(format(value)); setBad(true); } }}
     onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') { setDraft(format(value)); setBad(false); e.currentTarget.blur(); } }} />;
@@ -103,23 +204,23 @@ function InlineNumber({ label, value, disabled, onChange }: { label: string; val
 function Symbol({ value }: { value: string }) { return <span className="symbol">{value[0]}<sub>{value.slice(1)}</sub></span>; }
 function UnitSelect({ variable, disabled = false, onChange }: { variable: Variable; disabled?: boolean; onChange: (unit: string) => void }) {
   const options = unitChoices(variable.unit);
-  return options.length > 1 ? <select className="unit-select" aria-label={`Единица ${variable.symbol}`} title="Единица измерения" value={displayUnit(variable)} disabled={disabled} onChange={e => onChange(e.target.value)}>{options.map(unit => <option key={unit} value={unit}>{unit}</option>)}</select> : <small className="unit-static">{variable.unit}</small>;
+  return options.length > 1 ? <SelectControl className="unit-select" label={`Единица ${variable.symbol}`} title="Единица измерения" value={displayUnit(variable)} disabled={disabled} onChange={onChange} options={options.map(unit => ({ value: unit, label: unit, text: unit }))} /> : <small className="unit-static">{variable.unit}</small>;
 }
 function UnitCombobox({ value, onChange }: { value: string; onChange: (unit: string) => void }) {
   const search = value.replace(/[HhNn]/g, 'Н');
   const items = allowedUnits.filter(unit => unit.startsWith(search));
-  const { isOpen, highlightedIndex, getLabelProps, getInputProps, getToggleButtonProps, getMenuProps, getItemProps } = useCombobox({
-    items, inputValue: value, itemToString: item => item ?? '',
-    onInputValueChange: ({ inputValue }) => onChange(inputValue ?? ''),
-    onSelectedItemChange: ({ selectedItem }) => onChange(selectedItem ?? ''),
-  });
-  return <div className="unit-entry">
-    <label {...getLabelProps()}>Единица измерения</label>
-    <div className="unit-combobox">
-      <div className="unit-combobox-input"><input {...getInputProps({ 'aria-label': 'Единица измерения', maxLength: 30, placeholder: 'Без единицы' })} /><button type="button" aria-label="Показать единицы" {...getToggleButtonProps()}>⌄</button></div>
-      <ul {...getMenuProps()} className={`unit-options ${isOpen ? '' : 'hidden'}`}>{isOpen && items.map((unit, index) => <li key={unit || 'none'} {...getItemProps({ item: unit, index })} className={highlightedIndex === index ? 'highlighted' : ''}>{unit || 'Без единицы'}</li>)}</ul>
-    </div>
-  </div>;
+  return <ComboBox className="unit-entry unit-combobox" inputValue={value} onInputChange={onChange} onChange={unit => onChange(String(unit ?? '') === '__empty__' ? '' : String(unit ?? ''))} allowsCustomValue menuTrigger="input">
+      <Label>Единица измерения</Label>
+      <AriaGroup className="unit-combobox-input">
+        <AriaInput maxLength={30} placeholder="Без единицы" />
+        <AppButton slot="trigger" className="combobox-chevron" aria-label="Показать единицы" type="button">
+          <svg className="select-chevron" aria-hidden="true" viewBox="0 0 12 12"><path d="m3.1 4.6 2.9 2.8 2.9-2.8" /></svg>
+        </AppButton>
+      </AriaGroup>
+      <Popover className="unit-options"><ListBox className="unit-options-list" aria-label="Доступные единицы">
+        {items.map(unit => <ComboBoxItem key={unit || 'none'} id={unit || '__empty__'} textValue={unit || 'Без единицы'}>{unit || 'Без единицы'}</ComboBoxItem>)}
+      </ListBox></Popover>
+  </ComboBox>;
 }
 function newSymbol(variables: Variable[] = []) { let n = 1; while (variables.some(v => v.symbol === `q${n}`)) n++; return `q${n}`; }
 function VariableEditor({ variable, suggestedSymbol, onSave, onClose }: { variable?: Variable; suggestedSymbol: string; onSave: (draft: { symbol: string; value: number; unit: string }) => string | null; onClose: () => void }) {
@@ -127,7 +228,7 @@ function VariableEditor({ variable, suggestedSymbol, onSave, onClose }: { variab
   const [value, setValue] = useState(String(variable ? displayValue(variable) : 0));
   const [unit, setUnit] = useState(variable ? displayUnit(variable) : '');
   const [error, setError] = useState('');
-  return <div className="editor-backdrop" role="presentation" onClick={onClose}><form className="variable-editor" role="dialog" aria-modal="true" aria-label={variable ? `Изменить ${variable.symbol}` : 'Новая переменная'} onClick={e => e.stopPropagation()} onSubmit={e => {
+  return <ModalOverlay className="editor-backdrop" isOpen isDismissable onOpenChange={open => { if (!open) onClose(); }}><Modal><Dialog className="variable-dialog" aria-label={variable ? `Изменить ${variable.symbol}` : 'Новая переменная'}><Form className="variable-editor" onSubmit={e => {
     e.preventDefault();
     const n = Number(value.replace(',', '.'));
     if (!value.trim() || !Number.isFinite(n)) { setError('Введите числовое значение'); return; }
@@ -135,28 +236,43 @@ function VariableEditor({ variable, suggestedSymbol, onSave, onClose }: { variab
     const error = onSave({ symbol, value: n, unit });
     if (error) setError(error); else onClose();
   }}>
-    <h3>{variable ? `Переменная ${variable.symbol}` : 'Новая переменная'}</h3>
-    <label>Литера <input aria-label="Литера" value={symbol} maxLength={40} onChange={e => setSymbol(e.target.value)} autoFocus /></label>
-    <label>Значение <input aria-label="Значение" value={value} inputMode="decimal" onChange={e => setValue(e.target.value)} /></label>
+    <Heading slot="title" level={3}>{variable ? `Переменная ${variable.symbol}` : 'Новая переменная'}</Heading>
+    <label>Литера <AriaInput aria-label="Литера" value={symbol} maxLength={40} onChange={e => setSymbol(e.target.value)} autoFocus /></label>
+    <label>{variable && variableMode(variable) === 'graph' ? 'Значение задаётся графиком' : variable && variableMode(variable) === 'range' ? 'Значение задаётся диапазоном' : 'Значение'} <AriaInput aria-label="Значение" value={value} readOnly={!!variable && variableMode(variable) !== 'number'} inputMode="decimal" onChange={e => setValue(e.target.value)} /></label>
     <UnitCombobox value={unit} onChange={next => { setUnit(next); setError(''); }} />
     {error && <p className="range-error">{error}</p>}
-    <div className="range-actions"><button type="button" onClick={onClose}>Отмена</button><button type="submit" className="primary">Сохранить</button></div>
-  </form></div>;
+    <div className="range-actions"><AppButton type="button" onClick={onClose}>Отмена</AppButton><AppButton type="submit" className="primary">Сохранить</AppButton></div>
+  </Form></Dialog></Modal></ModalOverlay>;
 }
-function RangeEditor({ variable, onSave, onRemove, onClose }: { variable: Variable; onSave: (range: NonNullable<Variable['range']>) => void; onRemove: () => void; onClose: () => void }) {
+function RangeEditor({ variable, onSave, onRemove, onClose }: { variable: Variable; onSave: (range: NonNullable<Variable['range']>) => void; onRemove?: () => void; onClose: () => void }) {
   const unit = displayUnit(variable), toShown = (n: number) => convertUnit(n, variable.unit, unit), toStored = (n: number) => convertUnit(n, unit, variable.unit);
   const [min, setMin] = useState(toShown(variable.range?.min ?? Math.min(0, variable.value)));
   const [max, setMax] = useState(toShown(variable.range?.max ?? Math.max(10, variable.value + 1)));
   const [step, setStep] = useState(toShown(variable.range?.step ?? .1));
   const [error, setError] = useState('');
-  return <div className="editor-backdrop" role="presentation" onClick={onClose}><div className="range-editor" role="dialog" aria-modal="true" aria-label={`Диапазон ${variable.symbol}`} onClick={e => e.stopPropagation()}>
-    <h3>Диапазон {variable.symbol} {unit}</h3>
-    <label>От <input type="number" value={min} onChange={e => setMin(Number(e.target.value))} /></label>
-    <label>До <input type="number" value={max} onChange={e => setMax(Number(e.target.value))} /></label>
-    <label>Шаг <input type="number" value={step} onChange={e => setStep(Number(e.target.value))} /></label>
+  const save = () => { const range = { min: toStored(min), max: toStored(max), step: toStored(step) }; if (!Number.isFinite(min) || !Number.isFinite(max) || !Number.isFinite(step) || range.min >= range.max || range.step <= 0 || range.min < -1e5 || range.max > 1e5) { setError('Проверьте границы и положительный шаг'); return; } onSave(range); };
+  return <form className="range-inline-editor" aria-label={`Диапазон ${variable.symbol}`} onSubmit={event => { event.preventDefault(); save(); }}>
+    <div className="range-inline-fields">
+      <label>От <AriaInput type="number" step="any" value={String(min)} onChange={e => setMin(Number(e.target.value))} /></label>
+      <label>До <AriaInput type="number" step="any" value={String(max)} onChange={e => setMax(Number(e.target.value))} /></label>
+      <label>Шаг <AriaInput type="number" step="any" value={String(step)} onChange={e => setStep(Number(e.target.value))} /></label>
+      <span className="range-inline-unit">{unit}</span>
+    </div>
     {error && <p className="range-error">{error}</p>}
-    <div className="range-actions">{variable.range && <button onClick={onRemove}>Убрать range</button>}<button onClick={onClose}>Отмена</button><button className="primary" onClick={() => { const range = { min: toStored(min), max: toStored(max), step: toStored(step) }; if (!Number.isFinite(min) || !Number.isFinite(max) || !Number.isFinite(step) || range.min >= range.max || range.step <= 0 || range.min < -1e5 || range.max > 1e5) { setError('Укажите корректные границы и положительный шаг'); return; } onSave(range); }}>Сохранить</button></div>
-  </div></div>;
+    <div className="range-inline-actions">
+      {variable.range && onRemove && <AppButton type="button" onClick={onRemove}>Убрать</AppButton>}
+      {variable.range && <AppButton type="button" onClick={onClose}>Отмена</AppButton>}
+      <AppButton type="submit" className="primary">Сохранить</AppButton>
+    </div>
+  </form>;
+}
+function SaveAsDialog({ onSave, onClose }: { onSave: (name: string) => void; onClose: () => void }) {
+  const [name, setName] = useState("mechanics");
+  return <ModalOverlay className="editor-backdrop" isOpen isDismissable onOpenChange={open => { if (!open) onClose(); }}><Modal><Dialog className="save-dialog-dialog" aria-label="Сохранить проект как"><Form className="save-dialog" onSubmit={e => { e.preventDefault(); onSave(name); }}>
+    <Heading slot="title" level={3}>Сохранить проект как</Heading>
+    <label>Название файла <div className="save-name"><AriaInput value={name} onChange={e => setName(e.target.value)} autoFocus /><span>.physics.json</span></div></label>
+    <div className="range-actions"><AppButton type="button" onClick={onClose}>Отмена</AppButton><AppButton type="submit" className="primary">Сохранить</AppButton></div>
+  </Form></Dialog></Modal></ModalOverlay>;
 }
 type Pending = {
   kind: EffectKind;
@@ -177,12 +293,17 @@ export default function App() {
       null,
     ),
     [counts, setCounts] = useState([0, 0]),
+    [activeTool, setActiveTool] = useState<ToolKind>("select"),
+    [saveDialog, setSaveDialog] = useState(false),
+    [panelWidthPrefs, setPanelWidthPrefs] = useState(() => window.innerWidth <= 1100 ? { left: 190, right: 230 } : { left: 250, right: 240 }),
+    [layoutWidth, setLayoutWidth] = useState(() => window.innerWidth),
+    [layoutHeight, setLayoutHeight] = useState(() => window.innerHeight),
+    [responsivePanel, setResponsivePanel] = useState<"variables" | "inspector" | null>(null),
     [editVariable, setEditVariable] = useState<string | null>(null),
-    [editRange, setEditRange] = useState<string | null>(null),
     [editGraph, setEditGraph] = useState<string | null>(null),
-    [variableMenu, setVariableMenu] = useState<{ id: string; left: number; top: number } | null>(null);
+    [editingRange, setEditingRange] = useState<string | null>(null);
   const canvas = useRef<HTMLCanvasElement>(null),
-    file = useRef<HTMLInputElement>(null),
+    mainLayout = useRef<HTMLElement>(null),
     current = useRef(scene),
     display = useRef(scene),
     snapshot = useRef<Scene | null>(null),
@@ -191,6 +312,8 @@ export default function App() {
     future = useRef<Scene[]>([]),
     metrics = useRef<Metrics | null>(null),
     noticeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const panelWidths = fitPanelWidths(panelWidthPrefs, layoutWidth);
+  const inspectorAsDrawer = layoutWidth <= 800 || layoutWidth / Math.max(1, layoutHeight) <= 4 / 3;
   const camera = useRef<Camera>({ x: 0, y: 0.7, scale: 90 }),
     cameraTarget = useRef<Camera>({ x: 0, y: 0.7, scale: 90 }),
     state = useRef({ selected, grid, pending, running, showAuto }),
@@ -211,6 +334,22 @@ export default function App() {
     current.current = s;
     display.current = s;
     setScene(s);
+  };
+  const resizePanel = (panel: keyof typeof panelMinimums, width: number) => {
+    const availableWidth = mainLayout.current?.clientWidth ?? window.innerWidth,
+      drawer = panel === "right" ? inspectorAsDrawer : availableWidth <= 760,
+      min = Math.min(panelMinimums[panel], Math.max(120, availableWidth - 48));
+    setPanelWidthPrefs(current => {
+      let max: number;
+      if (drawer) max = Math.min(panelMaximums[panel], availableWidth - 48);
+      else if (panel === "left" && availableWidth <= 800) max = Math.min(panelMaximums.left, availableWidth - 384);
+      else {
+        const fitted = fitPanelWidths(current, availableWidth),
+          others = fitted.left + fitted.right - fitted[panel];
+        max = Math.min(panelMaximums[panel], availableWidth - 390 - others);
+      }
+      return { ...current, [panel]: Math.max(min, Math.min(max, width)) };
+    });
   };
   const tell = (text: string, error = false) => {
     clearTimeout(noticeTimer.current);
@@ -274,6 +413,8 @@ export default function App() {
     if (!s) return;
     to.current.push(structuredClone(current.current));
     update(s);
+    setEditingRange(null);
+    setEditGraph(null);
     setCounts([past.current.length, future.current.length]);
     if (!s.items.some((o) => o.id === selected)) setSelected(null);
   };
@@ -287,6 +428,15 @@ export default function App() {
     if (rect)
       cameraTarget.current = fit(current.current, rect.width, rect.height);
   };
+  useEffect(() => {
+    const element = mainLayout.current;
+    if (!element) return;
+    const observer = new ResizeObserver(() => setLayoutWidth(element.clientWidth));
+    const updateHeight = () => setLayoutHeight(window.innerHeight);
+    observer.observe(element);
+    window.addEventListener("resize", updateHeight);
+    return () => { observer.disconnect(); window.removeEventListener("resize", updateHeight); };
+  }, []);
   useEffect(() => {
     state.current = { selected, grid, pending, running, showAuto };
   }, [selected, grid, pending, running, showAuto]);
@@ -379,6 +529,7 @@ export default function App() {
         e.target instanceof HTMLTextAreaElement
       )
         return;
+      if (e.target instanceof Element && e.target.closest('[role="option"], [role="listbox"], [role="dialog"], [aria-haspopup="listbox"][aria-expanded="true"]')) return;
       if (e.code === "Space") {
         e.preventDefault();
         space.current = true;
@@ -392,10 +543,17 @@ export default function App() {
       }
       if (e.key === "Delete") remove();
       if (e.key === "Escape") {
+        setResponsivePanel(null);
+        setActiveTool("select");
         setPending(null);
         setNotice(null);
         gesture.current = null;
         drag.current = null;
+      }
+      if (e.key === "Home") centerView();
+      if (!e.ctrlKey && !e.metaKey && !e.altKey && !running && !pending) {
+        const tool = (Object.keys(toolShortcuts) as ToolKind[]).find(id => toolShortcuts[id] === e.key.toUpperCase());
+        if (tool) setActiveTool(tool);
       }
     };
     const release = (e: KeyboardEvent) => {
@@ -523,6 +681,11 @@ export default function App() {
       } else setSelected(null);
       return;
     }
+    if (activeTool !== "select") {
+      if (["force", "velocity", "acceleration"].includes(activeTool)) setActiveTool("select");
+      add(activeTool, p);
+      return;
+    }
     const chosen = current.current.items.find((o) => o.id === selected);
     if (chosen && geo(chosen)) {
       const i = handles(chosen, current.current.items).findIndex(
@@ -648,9 +811,9 @@ export default function App() {
       return;
     }
     setEditVariable(null);
-    setEditRange(null);
+    setEditingRange(null);
     setEditGraph(null);
-    setVariableMenu(null);
+    setActiveTool("select");
     snapshot.current = structuredClone(current.current);
     setRunning(true);
     setBusy(true);
@@ -697,18 +860,38 @@ export default function App() {
       fail(e instanceof Error ? e.message : "Ошибка WASM");
     }
   };
-  const save = () => {
+  const save = (name: string) => {
     const s = validate(
         running && snapshot.current ? snapshot.current : current.current,
       ),
       url = URL.createObjectURL(
-        new Blob([JSON.stringify(s, null, 2)], { type: "application/json" }),
+      new Blob([serializeProject(s)], { type: "application/json" }),
       ),
       a = document.createElement("a");
+    const base = name.trim().replace(/[<>:"/\\|?*\u0000-\u001f]/g, "-").replace(/\.+$/, "") || "mechanics";
     a.href = url;
-    a.download = "mechanics.physics.json";
+    a.download = base.endsWith(".physics.json") ? base : `${base.replace(/\.json$/i, "")}.physics.json`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
+    setSaveDialog(false);
+  };
+  const openProject = async (files: FileList | null) => {
+    const file = files?.[0];
+    if (!file) return;
+    setBusy(true);
+    try {
+      if (file.size > 2e6) throw Error("Файл больше 2 МБ");
+      const next = validate(JSON.parse(await file.text()));
+      commit(next);
+      setEditingRange(null);
+      setEditGraph(null);
+      setSelected(null);
+      centerView();
+    } catch (error) {
+      tell(error instanceof Error ? error.message : "Не удалось открыть проект", true);
+    } finally {
+      setBusy(false);
+    }
   };
   const registryChange = (value: Scene | (() => Scene)) => {
     if (running || simulation.current) return false;
@@ -722,23 +905,30 @@ export default function App() {
   const updateVariable = (id: string, patch: Partial<Variable>) => {
     return registryChange({ ...current.current, variables: current.current.variables?.map(v => v.id === id ? { ...v, ...patch } : v) });
   };
-  useEffect(() => {
-    if (!variableMenu) return;
-    const close = () => setVariableMenu(null);
-    const key = (e: KeyboardEvent) => { if (e.key === 'Escape') close(); };
-    window.addEventListener('scroll', close, true);
-    window.addEventListener('resize', close);
-    window.addEventListener('keydown', key);
-    return () => {
-      window.removeEventListener('scroll', close, true);
-      window.removeEventListener('resize', close);
-      window.removeEventListener('keydown', key);
-    };
-  }, [variableMenu]);
+  const setVariableMode = (variable: Variable, mode: 'number' | 'range' | 'graph') => {
+    const patch: Partial<Variable> = { mode };
+    if (mode === 'range' && !variable.range) {
+      const radius = Math.max(1, Math.abs(variable.value) * 0.1);
+      patch.range = { min: Math.max(-1e5, variable.value - radius), max: Math.min(1e5, variable.value + radius), step: radius / 100 };
+    }
+    if (mode === 'graph' && !variable.graph) patch.graph = { source: 'time', points: [{ x: 0, y: variable.value }, { x: 10, y: variable.value }] };
+    if (updateVariable(variable.id, patch)) {
+      setEditingRange(null);
+      setEditGraph(null);
+    }
+  };
+  const duplicateVariable = (variable: Variable) => {
+    const all = current.current.variables || [],
+      id = `v${Math.max(0, ...all.map(v => Number(v.id.slice(1)) || 0)) + 1}`,
+      match = variable.symbol.match(/^(.*?)(\d+)$/),
+      prefix = match?.[1] || variable.symbol;
+    let index = Number(match?.[2]) || 1;
+    while (all.some(v => v.symbol === `${prefix}${index}`)) index++;
+    registryChange({ ...current.current, variables: [...all, { ...variable, id, symbol: `${prefix}${index}`, auto: false, graph: variable.graph ? structuredClone(variable.graph) : undefined }] });
+  };
   const chosen = scene.items.find((o) => o.id === selected),
     observedScene = showAuto && !running && preview?.source === scene ? preview.scene : scene,
-    bodies = scene.items.filter(body),
-    menuVariable = scene.variables?.find(v => v.id === variableMenu?.id);
+    bodies = scene.items.filter(body);
   const field = (
     key: string,
     label: string,
@@ -756,17 +946,16 @@ export default function App() {
     return <div className="variable-field" key={chosen!.id + key}>
       <span className="field-label" title={label}>{label}</span>
       <span className="variable-select"><Symbol value={variable.symbol} />
-        <select aria-label={`Переменная: ${label}`} title="Выбрать переменную" value={id} disabled={running || computed}
-          onChange={e => registryChange(() => bindVariable(current.current, chosen!.id, key, e.target.value))}>
-          {(computed ? [variable] : compatible).map(v => <option key={v.id} value={v.id}>{v.symbol}</option>)}
-        </select>
+        <SelectControl className="variable-bind-select" label={`Переменная: ${label}`} title="Выбрать переменную" value={id!} disabled={running || computed}
+          onChange={next => registryChange(() => bindVariable(current.current, chosen!.id, key, next))}
+          options={(computed ? [variable] : compatible).map(v => ({ value: v.id, label: <Symbol value={v.symbol} />, text: v.symbol }))} />
       </span>
-      <button className="visibility-button" title={variable.visible ? 'Скрыть в списке переменных' : 'Показать в списке переменных'} aria-label={`${variable.visible ? 'Скрыть' : 'Показать'} ${variable.symbol}`} aria-pressed={variable.visible} disabled={running} onClick={() => updateVariable(id!, { visible: !variable.visible, visibilityLocked: true })}>{variable.visible ? <EyeIcon /> : <EyeSlashIcon />}</button>
-      <InlineNumber label={label} value={key.endsWith('.angle') && readField(shown, key.replace('.angle', '.magnitude')) === 0 ? displayValue(variable) : convertUnit(readField(shown, key), unit, displayUnit(variable))} disabled={disabled || computed || (running && (key.startsWith('vector.') || key.startsWith('velocity.') || key === 'vx' || key === 'vy'))} onChange={n => {
+      <AppButton className="visibility-button" title={variable.visible ? 'Скрыть в списке переменных' : 'Показать в списке переменных'} aria-label={`${variable.visible ? 'Скрыть' : 'Показать'} ${variable.symbol}`} aria-pressed={variable.visible} disabled={running} onClick={() => updateVariable(id!, { visible: !variable.visible, visibilityLocked: true })}>{variable.visible ? <EyeIcon /> : <EyeSlashIcon />}</AppButton>
+      <InlineNumber label={label} value={key.endsWith('.angle') && readField(shown, key.replace('.angle', '.magnitude')) === 0 ? displayValue(variable) : convertUnit(readField(shown, key), unit, displayUnit(variable))} disabled={disabled || computed || variableMode(variable) !== 'number' || (running && (key.startsWith('vector.') || key.startsWith('velocity.') || key === 'vx' || key === 'vy'))} onChange={n => {
         const physical = convertUnit(n, displayUnit(variable), unit);
         if (physical < min || physical > max) { tell(`${label}: число от ${min} до ${max} ${unit}`, true); return false; }
         if (key.startsWith('vector.') || key.startsWith('velocity.') || key === 'vx' || key === 'vy') return registryChange(() => setVariable(current.current, id!, convertUnit(n, displayUnit(variable), variable.unit)));
-        return change(chosen!.id, { [key]: physical, ...(geo(chosen!) && ['circle', 'pulley', 'bearing'].includes(chosen!.kind) && key === 'w' ? { h: physical } : {}) });
+        return change(chosen!.id, key === 'radius' ? { w: physical * 2, h: physical * 2 } : { [key]: physical });
       }} />
       <UnitSelect variable={variable} disabled={running} onChange={unit => updateVariable(id!, { displayUnit: unit })} />
     </div>;
@@ -774,26 +963,26 @@ export default function App() {
   return (
     <div className="app">
       <nav className="toolbar" aria-label="Инструменты">
+        <AppButton className="responsive-panel-toggle variables-toggle" aria-label="Открыть переменные" title="Переменные" aria-controls="variables-panel" aria-expanded={responsivePanel === "variables"} onClick={() => setResponsivePanel(responsivePanel === "variables" ? null : "variables")}><ListBulletsIcon /></AppButton>
+        <AppButton className="responsive-panel-toggle inspector-toggle" aria-label="Открыть свойства и объекты" title="Свойства и объекты" aria-controls="inspector-panel" aria-expanded={responsivePanel === "inspector"} onClick={() => setResponsivePanel(responsivePanel === "inspector" ? null : "inspector")}><SlidersHorizontalIcon /></AppButton>
         <Tool
           label="Новый проект"
           disabled={running || !!pending}
           onClick={() => {
             commit(structuredClone(initial));
+            setEditingRange(null);
+            setEditGraph(null);
             setSelected("2");
             centerView();
           }}
         >
           <FileIcon />
         </Tool>
-        <Tool
-          label="Открыть проект"
-          disabled={running || busy || !!pending}
-          onClick={() => file.current?.click()}
-        >
-          <FolderOpenIcon />
-        </Tool>
-        <Tool label="Скачать проект" onClick={save}>
-          <DownloadSimpleIcon />
+        <FileTrigger acceptedFileTypes={[".json", ".physics.json"]} onSelect={openProject}>
+          <Tool label="Открыть проект" disabled={running || busy || !!pending}><FolderOpenIcon /></Tool>
+        </FileTrigger>
+        <Tool label="Сохранить как" onClick={() => setSaveDialog(true)}>
+          <FloppyDiskIcon />
         </Tool>
         <span className="divider" />
         <Tool
@@ -819,26 +1008,20 @@ export default function App() {
         </Tool>
         <span className="divider" />
         <Tool
-          label="Сетка 1 м · привязка 0,1 м"
+          label="Сетка"
+          tooltip="Показывать сетку и включать привязку перемещения с шагом 0,1 м."
           active={grid}
           onClick={() => setGrid(!grid)}
         >
           <GridFourIcon />
         </Tool>
-        <Tool label="Центрировать систему" onClick={centerView}>
-          <CrosshairSimpleIcon />
+        <Tool label="Центрировать сцену" tooltip="Вписать все объекты сцены в область просмотра." shortcut="Home" onClick={centerView}>
+          <CornersOutIcon />
         </Tool>
-        <Tool label="Автовекторы" active={showAuto} onClick={() => setShowAuto(!showAuto)}>
-          <FlowArrowIcon />
+        <Tool label="Показывать векторы" tooltip="Автоматически показывать силы, скорости и ускорения." active={showAuto} onClick={() => setShowAuto(!showAuto)}>
+          <ArrowDownIcon />
         </Tool>
         <span className="spacer" />
-        <Tool
-          label="Найти статическое равновесие"
-          disabled={running || !!pending}
-          onClick={() => start("static")}
-        >
-          <ScalesIcon />
-        </Tool>
         <Tool
           label={
             running ? "Остановить и восстановить сцену" : "Запустить симуляцию"
@@ -857,85 +1040,57 @@ export default function App() {
           )}
         </Tool>
       </nav>
-      <main>
-        <aside className="left">
+      <main ref={mainLayout} className={`${responsivePanel === "variables" ? "variables-drawer-open" : ""} ${responsivePanel === "inspector" ? "inspector-drawer-open" : ""}`} style={{ "--left-panel-width": `${panelWidths.left}px`, "--right-panel-width": `${panelWidths.right}px`, "--left-drawer-width": `${panelWidthPrefs.left}px`, "--right-drawer-width": `${panelWidthPrefs.right}px` } as CSSProperties}>
+        {responsivePanel && <AppButton className="panel-scrim" aria-label="Закрыть панель" onClick={() => setResponsivePanel(null)} />}
+        <aside id="variables-panel" className={`left variables-panel ${responsivePanel === "variables" ? "drawer-open" : ""}`}>
           <section>
-            <h2>Объекты сцены</h2>
-            <div className="scroll object-list">
-              {scene.items.map((o) => (
-                <button
-                  key={o.id}
-                  className={
-                    "object-row " +
-                    (selected === o.id ? "selected" : "") +
-                    (pending &&
-                    ((pending.scope !== "selection" && body(o)) ||
-                      pending.ids.includes(o.id))
-                      ? " target"
-                      : "")
-                  }
-                  onClick={() => choose(o.id)}
-                >
-                  <ComponentIcon kind={o.kind} />
-                  {geo(o) && o.fixed && (
-                    <LockSimpleIcon size={12} className="lock" />
-                  )}
-                  <span>
-                    {o.kind === "acceleration" && o.gravity
-                      ? "Свободное падение"
-                      : names[o.kind]}
-                  </span>
-                  {o.kind !== "surface" && <i>{indexLabel(o)}</i>}
-                </button>
-              ))}
-            </div>
-          </section>
-          <section>
-            <h2>Компоненты</h2>
-            <div className="scroll components">
-              {kinds.map((kind) => (
-                <button
-                  key={kind}
-                  draggable={!running && !pending}
-                  disabled={running || !!pending}
-                  onDragStart={(e) =>
-                    e.dataTransfer.setData("text/plain", kind)
-                  }
-                  onClick={() => add(kind)}
-                >
-                  <ComponentIcon kind={kind} />
-                  <span>{names[kind]}</span>
-                </button>
-              ))}
+            <div className="section-heading"><h2>Переменные</h2><AppButton className="drawer-close" title="Закрыть панель" aria-label="Закрыть панель переменных" onClick={() => setResponsivePanel(null)}><XIcon /></AppButton><AppButton title="Создать переменную" aria-label="Создать переменную" disabled={running || !!pending} onClick={() => setEditVariable('new')}><PlusIcon /></AppButton></div>
+            <div className="scroll variables">
+              {scene.variables?.filter(v => v.visible).map(v => <div className="variable-card" key={v.id}>
+                <div className="variable-card-line">
+                  <Symbol value={v.symbol} />
+                  <InlineNumber label={`Переменная ${v.symbol}`} value={displayValue(v, observedScene.variables?.find(x => x.id === v.id)?.value ?? v.value)} disabled={running || !!v.derived || variableMode(v) !== 'number'} onChange={n => registryChange(() => setVariable(current.current, v.id, convertUnit(n, displayUnit(v), v.unit)))} />
+                  <UnitSelect variable={v} disabled={running} onChange={unit => updateVariable(v.id, { displayUnit: unit })} />
+                </div>
+                <div className="variable-actions">
+                  <AppButton className="variable-tab" disabled={running || !!v.derived} title="Числовой режим" aria-label={`Числовой режим ${v.symbol}`} aria-pressed={variableMode(v) === 'number'} onClick={() => setVariableMode(v, 'number')}><NumberSquareOneIcon weight="fill" /></AppButton>
+                  <AppButton className="variable-tab" disabled={running || !!v.derived} title="Диапазон" aria-label={`Диапазон ${v.symbol}`} aria-pressed={variableMode(v) === 'range'} onClick={() => setVariableMode(v, 'range')}><SlidersHorizontalIcon weight="fill" /></AppButton>
+                  <AppButton className="variable-tab" disabled={running || !!v.derived} title="График зависимости" aria-label={`График зависимости ${v.symbol}`} aria-pressed={variableMode(v) === 'graph'} onClick={() => setVariableMode(v, 'graph')}><ChartLineIcon weight="fill" /></AppButton>
+                  <span className="variable-actions-spacer" />
+                  <AppButton disabled={running} title="Дублировать" aria-label={`Дублировать ${v.symbol}`} onClick={() => duplicateVariable(v)}><CopySimpleIcon weight="fill" /></AppButton>
+                  <AppButton disabled={running} title="Удалить" aria-label={`Удалить ${v.symbol}`} onClick={() => { if (editingRange === v.id) setEditingRange(null); if (editGraph === v.id) setEditGraph(null); registryChange(removeVariable(current.current, v.id)); }}><TrashIcon weight="fill" /></AppButton>
+                </div>
+                {variableMode(v) === 'range' && <div className="variable-tool-content" aria-label={`Диапазон ${v.symbol}`}>
+                  {editingRange === v.id || !v.range ? <RangeEditor key={`${v.id}-range`} variable={v} onClose={() => setEditingRange(null)} onSave={range => { if (updateVariable(v.id, { range })) setEditingRange(null); }} onRemove={() => { updateVariable(v.id, { range: undefined, mode: 'number' }); setEditingRange(null); }} /> : <>
+                    <Slider className="variable-range" aria-label={`Диапазон ${v.symbol}`} minValue={v.range.min} maxValue={v.range.max} step={v.range.step} value={Math.max(v.range.min, Math.min(v.range.max, observedScene.variables?.find(x => x.id === v.id)?.value ?? v.value))} isDisabled={running} onChange={next => registryChange(() => setVariable(current.current, v.id, Array.isArray(next) ? next[0] : next))}><SliderTrack><SliderThumb /></SliderTrack></Slider>
+                    <div className="variable-range-meta"><span>{displayValue(v, v.range.min)} – {displayValue(v, v.range.max)} {displayUnit(v)}</span><AppButton disabled={running || !!v.derived} className="range-inline-config" onClick={() => setEditingRange(v.id)}>Границы</AppButton></div>
+                  </>}
+                </div>}
+                {variableMode(v) === 'graph' && <div className="variable-graph-preview"><VariableGraph key={v.id} variable={v} variables={scene.variables || []} onRequestEdit={() => setEditGraph(v.id)} /></div>}
+              </div>)}
+              {!scene.variables?.some(v => v.visible) && <p className="variables-empty">Покажите переменные кнопкой глаза в свойствах.</p>}
             </div>
           </section>
         </aside>
+        <ResizeHandle className="variables-resize" name="переменных" width={layoutWidth <= 760 && responsivePanel === "variables" ? Math.min(panelWidthPrefs.left, layoutWidth - 48) : panelWidths.left} min={layoutWidth <= 760 && responsivePanel === "variables" ? Math.min(panelMinimums.left, Math.max(120, layoutWidth - 48)) : panelMinimums.left} max={layoutWidth <= 760 && responsivePanel === "variables" ? Math.min(panelMaximums.left, layoutWidth - 48) : panelMaximums.left} onResize={width => resizePanel("left", width)} />
+        <aside className="tool-panel" aria-label="Инструменты">
+          <div className="scroll tool-list">
+            <CanvasToolButton label="Выделение" description="Выбирать, перемещать и настраивать объекты" shortcut={toolShortcuts.select} active={activeTool === "select"} disabled={running || !!pending} onClick={() => setActiveTool("select")}><CursorIcon /></CanvasToolButton>
+            {kinds.map(kind => <CanvasToolButton key={kind} label={names[kind]} description={toolDescriptions[kind]} shortcut={toolShortcuts[kind]} active={activeTool === kind} disabled={running || !!pending} onClick={() => setActiveTool(kind)}><ComponentIcon kind={kind} /></CanvasToolButton>)}
+          </div>
+        </aside>
+        <div className="panel-divider" aria-hidden="true" />
         <div className="workspace">
           <canvas
             ref={canvas}
             tabIndex={0}
             aria-label="Чертёж механической системы"
+            style={{ cursor: activeTool === "select" ? undefined : "crosshair" }}
             onContextMenu={(e) => e.preventDefault()}
             onPointerDown={pointerDown}
             onPointerMove={pointerMove}
             onPointerUp={pointerUp}
             onPointerCancel={pointerUp}
-            onDragOver={(e) => {
-              e.preventDefault();
-              const p = point(e.clientX, e.clientY);
-              hover.current =
-                hit(current.current.items, p, 8 / camera.current.scale, true)
-                  ?.id || null;
-            }}
-            onDragLeave={() => {
-              hover.current = null;
-            }}
-            onDrop={(e) => {
-              e.preventDefault();
-              const kind = e.dataTransfer.getData("text/plain") as Kind;
-              if (kinds.includes(kind)) add(kind, point(e.clientX, e.clientY));
-              hover.current = null;
-            }}
           />
           {pending && (
             <div
@@ -944,22 +1099,11 @@ export default function App() {
               aria-label="Назначение воздействия"
             >
               <strong>{names[pending.kind]}</strong>
-              <select
-                aria-label="Получатели воздействия"
-                value={pending.scope}
-                onChange={(e) =>
-                  setPending({
-                    ...pending,
-                    scope: e.target.value as Pending["scope"],
-                  })
-                }
-              >
-                <option value="selection">
-                  Выбранные тела ({pending.ids.length})
-                </option>
-                <option value="current">Все текущие тела</option>
-                <option value="all">Все тела, включая будущие</option>
-              </select>
+              <SelectControl label="Получатели воздействия" value={pending.scope} onChange={scope => setPending({ ...pending, scope: scope as Pending["scope"] })} options={[
+                { value: "selection", label: `Выбранные тела (${pending.ids.length})`, text: `Выбранные тела (${pending.ids.length})` },
+                { value: "current", label: "Все текущие тела", text: "Все текущие тела" },
+                { value: "all", label: "Все тела, включая будущие", text: "Все тела, включая будущие" },
+              ]} />
               <Tool
                 label="Продолжить"
                 disabled={pending.scope === "selection" && !pending.ids.length}
@@ -987,32 +1131,21 @@ export default function App() {
             </div>
           )}
         </div>
-        <aside className="right">
+        <ResizeHandle className="inspector-resize" name="свойств и объектов" width={inspectorAsDrawer && responsivePanel === "inspector" ? Math.min(panelWidthPrefs.right, layoutWidth - 48) : panelWidths.right} min={inspectorAsDrawer && responsivePanel === "inspector" ? Math.min(panelMinimums.right, Math.max(120, layoutWidth - 48)) : panelMinimums.right} max={inspectorAsDrawer && responsivePanel === "inspector" ? Math.min(panelMaximums.right, layoutWidth - 48) : panelMaximums.right} reverse onResize={width => resizePanel("right", width)} />
+        <aside id="inspector-panel" className={`right ${responsivePanel === "inspector" ? "drawer-open" : ""}`}>
           <section>
-            <h2>{pending ? "Назначение" : "Свойства"}</h2>
+            <div className="section-heading"><h2>{pending ? "Назначение" : "Свойства"}</h2><AppButton className="drawer-close" title="Закрыть панель" aria-label="Закрыть свойства и объекты" onClick={() => setResponsivePanel(null)}><XIcon /></AppButton></div>
             <div className="scroll properties">
               {pending ? (
                 <div className="target-list">
-                  {bodies.map((b) => (
-                    <label className="check" key={b.id}>
-                      <input
-                        type="checkbox"
-                        checked={
-                          pending.scope !== "selection" ||
-                          pending.ids.includes(b.id)
-                        }
-                        onChange={() => choose(b.id)}
-                      />
-                      {itemLabel(b)}
-                    </label>
-                  ))}
+                  {bodies.map((b) => <AriaCheckbox className="check" key={b.id} isSelected={pending.scope !== "selection" || pending.ids.includes(b.id)} onChange={() => choose(b.id)}><span className="checkbox-indicator" aria-hidden="true" />{itemLabel(b)}</AriaCheckbox>)}
                 </div>
               ) : chosen ? (
                 <>
                   <div className="property-title">
                     <ComponentIcon kind={chosen.kind} />
                     <span>{names[chosen.kind]}</span>
-                    {chosen.kind !== "surface" && <input
+                    {chosen.kind !== "surface" && <AriaInput
                       className="index-input"
                       aria-label="Индекс"
                       key={chosen.id + ":" + chosen.index}
@@ -1043,10 +1176,10 @@ export default function App() {
                     <>
                       {field('vector.magnitude', 'Модуль', chosen.kind === 'force' ? 'Н' : chosen.kind === 'velocity' ? 'м/с' : 'м/с²', 0)}
                       {field('vector.angle', 'Угол', '°', 0, 360)}
-                      <details className="observed-fields"><summary>Проекции</summary>
+                      <Disclosure className="observed-fields"><Heading level={3}><AppButton slot="trigger">Проекции</AppButton></Heading><DisclosurePanel>
                         {field('vector.x', 'Проекция X', chosen.kind === 'force' ? 'Н' : chosen.kind === 'velocity' ? 'м/с' : 'м/с²')}
                         {field('vector.y', 'Проекция Y', chosen.kind === 'force' ? 'Н' : chosen.kind === 'velocity' ? 'м/с' : 'м/с²')}
-                      </details>
+                      </DisclosurePanel></Disclosure>
                       <div className="target-summary">
                         {chosen.scope === "all"
                           ? "Все тела, включая будущие"
@@ -1057,7 +1190,7 @@ export default function App() {
                               )
                               .join(", ")}
                       </div>
-                      <button
+                      <AppButton
                         className="text-action"
                         disabled={running}
                         onClick={() =>
@@ -1070,18 +1203,9 @@ export default function App() {
                         }
                       >
                         Изменить получателей
-                      </button>
+                      </AppButton>
                       {chosen.kind === "acceleration" && (
-                        <label className="check">
-                          <input
-                            type="checkbox"
-                            checked={!!chosen.gravity}
-                            onChange={(e) =>
-                              change(chosen.id, { gravity: e.target.checked })
-                            }
-                          />
-                          Ускорение свободного падения
-                        </label>
+                        <AriaCheckbox className="check" isSelected={!!chosen.gravity} onChange={checked => change(chosen.id, { gravity: checked })}><span className="checkbox-indicator" aria-hidden="true" />Ускорение свободного падения</AriaCheckbox>
                       )}
                     </>
                   ) : (
@@ -1090,124 +1214,49 @@ export default function App() {
                         {field("x", "x", "м", -1e5, 1e5, running)}
                         {field("y", "y", "м", -1e5, 1e5, running)}
                       </div>
-                      {chosen.kind !== "rod" && <div className="pair">
-                        {field(
-                          "w",
-                          chosen.kind === "circle" ||
-                            chosen.kind === "pulley" ||
-                            chosen.kind === "bearing"
-                            ? "Диаметр"
-                            : "Ширина",
-                          "м",
-                          0.001,
-                          1e5,
-                          running,
-                        )}
-                        {!["circle", "pulley", "bearing"].includes(
-                          chosen.kind,
-                        ) && field("h", "Высота", "м", 0.001, 1e5, running)}
+                      {["circle", "pulley", "bearing"].includes(chosen.kind) ? (
+                        field("radius", "Радиус", "м", 0.0005, 1e5, running)
+                      ) : chosen.kind === "surface" ? (
+                        field("w", "Длина", "м", 0.001, 1e5, running)
+                      ) : !["spring", "rope"].includes(chosen.kind) && (
+                        <div className="pair">
+                          {field("w", chosen.kind === "rod" ? "Длина" : "Ширина", "м", 0.001, 1e5, running)}
+                          {field("h", chosen.kind === "rod" ? "Толщина" : "Высота", "м", 0.001, 1e5, running)}
+                        </div>
+                      )}
+                      {!["bearing", "spring", "rope"].includes(chosen.kind) && field("angle", "Угол φ", "рад", -1e5, 1e5, running)}
+                      {chosen.kind === "surface" && <div className="pair">
+                        {field("mu", "Трение μ", "", 0)}
+                        {field("restitution", "Восстановление e", "", 0, 1)}
                       </div>}
-                      {!["rod", "surface"].includes(chosen.kind) && field("angle", "Угол φ", "рад", -1e5, 1e5, running)}
-                      {body(chosen) ? (
+                      {body(chosen) && chosen.kind !== "surface" ? (
                         <>
                           <div className="pair">
                             {field(
                               "mass",
                               "Масса m",
                               "кг",
-                              chosen.fixed || chosen.trajectory ? 0 : 0.001,
+                              chosen.fixed ? 0 : 0.001,
                             )}
                             {field("mu", "Трение μ", "", 0)}
                           </div>
                           {field("restitution", "Восстановление e", "", 0, 1)}
-                          {field('velocity.magnitude', 'Модуль скорости', 'м/с', 0)}
+                          <div className="pair">
+                            {field('velocity.magnitude', 'Модуль скорости', 'м/с', 0)}
+                            {field("omega", "Вращение ω", "рад/с")}
+                          </div>
                           {field('velocity.angle', 'Угол скорости', '°', 0, 360)}
-                          <details className="observed-fields"><summary>Проекции скорости</summary>
+                          <Disclosure className="observed-fields"><Heading level={3}><AppButton slot="trigger">Проекции скорости</AppButton></Heading><DisclosurePanel>
                             {field('vx', 'Скорость X', 'м/с')}
                             {field('vy', 'Скорость Y', 'м/с')}
-                          </details>
-                          {field("omega", "Вращение ω", "рад/с")}
-                          <details className="observed-fields"><summary>Вычисляемые величины</summary>{derivedFields.map(f => field(f.key, f.label, f.unit, -1e5, 1e5, true))}</details>
-                          <label className="check">
-                            <input
-                              type="checkbox"
-                              checked={chosen.fixed}
-                              disabled={running}
-                              onChange={(e) =>
-                                change(chosen.id, { fixed: e.target.checked })
-                              }
-                            />
-                            Закрепить{" "}
-                            {chosen.kind === "pulley" ? "ось" : "тело"}
-                          </label>
-                          <label className="check">
-                            <input
-                              type="checkbox"
-                              checked={!!chosen.trajectory}
-                              disabled={running}
-                              onChange={(e) =>
-                                change(chosen.id, {
-                                  trajectory: e.target.checked
-                                    ? {
-                                        x: String(chosen.x),
-                                        y: String(chosen.y),
-                                        angle: String(chosen.angle),
-                                      }
-                                    : undefined,
-                                })
-                              }
-                            />
-                            Заданное движение
-                          </label>
-                          {chosen.trajectory && (
-                            <div className="formulas">
-                              {(["x", "y", "angle"] as const).map((key) => (
-                                <label key={`${chosen.id}:${key}:${chosen.trajectory![key]}`}>
-                                  <span>{key === "angle" ? "φ" : key}(t)</span>
-                                  <input
-                                    aria-label={`${key}(t)`}
-                                    defaultValue={chosen.trajectory![key]}
-                                    maxLength={255}
-                                    onBlur={(e) => {
-                                      if (
-                                        e.target.value.trim() !==
-                                        chosen.trajectory![key]
-                                      )
-                                        change(chosen.id, {
-                                          trajectory: {
-                                            ...chosen.trajectory!,
-                                            [key]: e.target.value.trim(),
-                                          },
-                                        });
-                                    }}
-                                    onKeyDown={(e) => {
-                                      if (e.key === "Enter")
-                                        e.currentTarget.blur();
-                                    }}
-                                  />
-                                </label>
-                              ))}
-                              <small>
-                                t — секунды. Например: 2 + sin(pi*t). Идеальный
-                                привод: реакции не меняют заданный путь.
-                              </small>
-                            </div>
-                          )}
+                          </DisclosurePanel></Disclosure>
+                          <Disclosure className="observed-fields"><Heading level={3}><AppButton slot="trigger">Вычисляемые величины</AppButton></Heading><DisclosurePanel>{derivedFields.map(f => field(f.key, f.label, f.unit, -1e5, 1e5, true))}</DisclosurePanel></Disclosure>
+                          <AriaCheckbox className="check" isSelected={chosen.fixed} isDisabled={running} onChange={checked => change(chosen.id, { fixed: checked })}><span className="checkbox-indicator" aria-hidden="true" />Закрепить {chosen.kind === "pulley" ? "ось" : "тело"}</AriaCheckbox>
                         </>
                       ) : (
                         <>
                           {chosen.kind === "bearing" ? (
-                            <label className="check">
-                              <input
-                                type="checkbox"
-                                checked={chosen.fixed}
-                                disabled={running}
-                                onChange={(e) =>
-                                  change(chosen.id, { fixed: e.target.checked })
-                                }
-                              />
-                              Закрепить центр
-                            </label>
+                            <AriaCheckbox className="check" isSelected={chosen.fixed} isDisabled={running} onChange={checked => change(chosen.id, { fixed: checked })}><span className="checkbox-indicator" aria-hidden="true" />Закрепить центр</AriaCheckbox>
                           ) : (
                             <>
                               {field("length", "Длина l₀", "м", 0.001)}
@@ -1223,28 +1272,13 @@ export default function App() {
                                 </div>
                               )}
                               {chosen.kind === "rope" && (
-                                <label className="select-field">
+                                <div className="select-field">
                                   <span>Через блок</span>
-                                  <select
-                                    aria-label="Через блок"
-                                    value={chosen.via || ""}
-                                    disabled={running}
-                                    onChange={(e) =>
-                                      change(chosen.id, {
-                                        via: e.target.value || undefined,
-                                      })
-                                    }
-                                  >
-                                    <option value="">Без блока</option>
-                                    {bodies
-                                      .filter((b) => b.kind === "pulley")
-                                      .map((b) => (
-                                        <option key={b.id} value={b.id}>
-                                          Блок {indexLabel(b)}
-                                        </option>
-                                      ))}
-                                  </select>
-                                </label>
+                                  <SelectControl label="Через блок" value={chosen.via || ""} disabled={running} onChange={via => change(chosen.id, { via: via || undefined })} options={[
+                                    { value: "", label: "Без блока", text: "Без блока" },
+                                    ...bodies.filter(b => b.kind === "pulley").map(b => ({ value: b.id, label: `Блок ${indexLabel(b)}`, text: `Блок ${indexLabel(b)}` })),
+                                  ]} />
+                                </div>
                               )}
                             </>
                           )}
@@ -1307,71 +1341,37 @@ export default function App() {
             </div>
           </section>
           <section>
-            <div className="section-heading"><h2>Переменные</h2><button title="Создать переменную" aria-label="Создать переменную" disabled={running || !!pending} onClick={() => setEditVariable('new')}><PlusIcon /></button></div>
-            <div className="scroll variables">
-              {scene.variables?.filter(v => v.visible).map(v => <div className="variable-card" key={v.id}>
-                <div className="variable-card-line">
-                  <Symbol value={v.symbol} />
-                  <InlineNumber label={`Переменная ${v.symbol}`} value={displayValue(v, observedScene.variables?.find(x => x.id === v.id)?.value ?? v.value)} disabled={running || !!v.derived} onChange={n => registryChange(() => setVariable(current.current, v.id, convertUnit(n, displayUnit(v), v.unit)))} />
-                  <UnitSelect variable={v} disabled={running} onChange={unit => updateVariable(v.id, { displayUnit: unit })} />
-                  <button className="variable-menu-trigger" aria-label={`Действия с ${v.symbol}`} aria-haspopup="menu" aria-expanded={variableMenu?.id === v.id} title="Действия" disabled={running} onClick={e => {
-                    if (variableMenu?.id === v.id) return setVariableMenu(null);
-                    const rect = e.currentTarget.getBoundingClientRect();
-                    setVariableMenu({ id: v.id, left: Math.max(8, Math.min(rect.right - 180, window.innerWidth - 188)), top: rect.bottom + 204 <= window.innerHeight ? rect.bottom + 4 : Math.max(8, rect.top - 204) });
-                  }}><DotsThreeIcon /></button>
-                </div>
-                {v.range && <div className="variable-range"><input type="range" aria-label={`Диапазон ${v.symbol}`} min={v.range.min} max={v.range.max} step={v.range.step} value={Math.max(v.range.min, Math.min(v.range.max, v.value))} disabled={running} onChange={e => registryChange(() => setVariable(current.current, v.id, Number(e.target.value)))} /><button disabled={running} onClick={() => setEditRange(v.id)} title="Редактировать range">✎</button></div>}
-                {v.graph && <button className="graph-link" disabled={running} onClick={() => setEditGraph(v.id)}>График зависимости ↗</button>}
-              </div>)}
-              {!scene.variables?.some(v => v.visible) && <p className="variables-empty">Покажите переменные кнопкой глаза в свойствах.</p>}
+            <h2>Объекты сцены</h2>
+            <div className="scroll object-list">
+              {scene.items.map((o) => (
+                <AppButton
+                  key={o.id}
+                  className={
+                    "object-row " +
+                    (selected === o.id ? "selected" : "") +
+                    (pending &&
+                    ((pending.scope !== "selection" && body(o)) || pending.ids.includes(o.id))
+                      ? " target"
+                      : "")
+                  }
+                  onClick={() => choose(o.id)}
+                >
+                  <ComponentIcon kind={o.kind} />
+                  {geo(o) && o.fixed && <LockSimpleIcon size={12} className="lock" />}
+                  <span>{o.kind === "acceleration" && o.gravity ? "Свободное падение" : names[o.kind]}</span>
+                  {o.kind !== "surface" && <i>{indexLabel(o)}</i>}
+                </AppButton>
+              ))}
             </div>
           </section>
         </aside>
       </main>
-      {!running && variableMenu && menuVariable && createPortal(<div className="variable-menu-layer">
-        <div className="variable-menu-dismiss" onClick={() => setVariableMenu(null)} />
-        <div className="variable-menu-items" role="menu" style={{ left: variableMenu.left, top: variableMenu.top }} onClick={() => setVariableMenu(null)}>
-          <button role="menuitem" onClick={() => { const all = current.current.variables || []; const nextId = `v${Math.max(0, ...all.map(x => Number(x.id.slice(1)) || 0)) + 1}`; const match = menuVariable.symbol.match(/^(.*?)(\d+)$/), prefix = match?.[1] || menuVariable.symbol; let index = Number(match?.[2]) || 1; while (all.some(x => x.symbol === `${prefix}${index}`)) index++; registryChange({ ...current.current, variables: [...all, { ...menuVariable, id: nextId, symbol: `${prefix}${index}`, auto: false, graph: menuVariable.graph ? structuredClone(menuVariable.graph) : undefined }] }); }}>Дублировать</button>
-          <button role="menuitem" disabled={!!menuVariable.derived} onClick={() => setEditVariable(menuVariable.id)}>Изменить</button>
-          <button role="menuitem" onClick={() => registryChange(removeVariable(current.current, menuVariable.id))}>Удалить</button>
-          <button role="menuitem" disabled={!!menuVariable.derived} onClick={() => setEditRange(menuVariable.id)}>{menuVariable.range ? 'Редактировать range' : 'Сделать range'}</button>
-          <button role="menuitem" disabled={!!menuVariable.derived} onClick={() => setEditGraph(menuVariable.id)}>{menuVariable.graph ? 'Редактировать график' : 'Сделать график'}</button>
-          {menuVariable.graph && <button role="menuitem" onClick={() => updateVariable(menuVariable.id, { graph: undefined })}>Убрать график</button>}
-        </div>
-      </div>, document.body)}
+      {saveDialog && <SaveAsDialog onSave={save} onClose={() => setSaveDialog(false)} />}
       {!running && editVariable && <VariableEditor key={editVariable} variable={scene.variables?.find(v => v.id === editVariable)} suggestedSymbol={newSymbol(scene.variables)} onClose={() => setEditVariable(null)} onSave={draft => {
         try { return registryChange(saveVariable(current.current, { ...draft, ...(editVariable === 'new' ? {} : { id: editVariable }) })) ? null : 'Не удалось сохранить переменную'; }
         catch (error) { return error instanceof Error ? error.message : String(error); }
       }} />}
-      {!running && editRange && scene.variables?.find(v => v.id === editRange) && <RangeEditor key={editRange} variable={scene.variables.find(v => v.id === editRange)!} onClose={() => setEditRange(null)} onSave={range => { updateVariable(editRange, { range }); setEditRange(null); }} onRemove={() => { updateVariable(editRange, { range: undefined }); setEditRange(null); }} />}
-      {!running && editGraph && scene.variables?.find(v => v.id === editGraph) && <GraphEditor key={editGraph} variable={scene.variables.find(v => v.id === editGraph)!} variables={scene.variables} onClose={() => setEditGraph(null)} onSave={graph => { if (updateVariable(editGraph, { graph })) setEditGraph(null); }} />}
-      <input
-        ref={file}
-        type="file"
-        hidden
-        accept=".json,.physics.json"
-        onChange={async (e) => {
-          const input = e.currentTarget,
-            f = input.files?.[0];
-          if (!f) return;
-          setBusy(true);
-          try {
-            if (f.size > 2e6) throw Error("Файл больше 2 МБ");
-            const s = validate(JSON.parse(await f.text()));
-            commit(s);
-            setSelected(null);
-            centerView();
-          } catch (err) {
-            tell(
-              err instanceof Error ? err.message : "Не удалось открыть проект",
-              true,
-            );
-          } finally {
-            input.value = "";
-            setBusy(false);
-          }
-        }}
-      />
+      {!running && editGraph && scene.variables?.find(v => v.id === editGraph) && <GraphEditor key={editGraph} variable={scene.variables.find(v => v.id === editGraph)!} variables={scene.variables || []} onClose={() => setEditGraph(null)} onSave={graph => { updateVariable(editGraph, { graph }); }} />}
     </div>
   );
 }

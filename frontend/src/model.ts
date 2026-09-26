@@ -152,7 +152,7 @@ export function make(kind: Kind, id: string, x = 0, y = 0): Item {
             : 1,
     h:
       kind === "surface"
-        ? 0.15
+        ? 0.001
         : kind === "rod"
           ? 0.12
           : kind === "spring" || kind === "rope"
@@ -167,7 +167,7 @@ export function make(kind: Kind, id: string, x = 0, y = 0): Item {
       ...g,
       kind: kind as BodyKind,
       mass: kind === "surface" ? 0 : 1,
-      mu: 0.3,
+      mu: kind === "surface" ? 0.3 : 0,
       restitution: 0,
       vx: 0,
       vy: 0,
@@ -187,7 +187,7 @@ export function make(kind: Kind, id: string, x = 0, y = 0): Item {
 export const initial: Scene = numberScene({
   version: 2,
   items: [
-    make("surface", "1", 0, 1.6),
+    make("surface", "1", 0, 1.525),
     make("rect", "2", 0, 0),
     {
       id: "3",
@@ -211,6 +211,7 @@ export const world = (o: Geometry, p: Vec) => {
 };
 export function inside(o: Geometry, p: Vec, pad = 0) {
   const q = local(o, p);
+  if (o.kind === "surface") return Math.abs(q.x) <= o.w / 2 + pad && Math.abs(q.y) <= pad;
   return ["circle", "pulley", "bearing"].includes(o.kind)
     ? Math.hypot(q.x, q.y) <= o.w / 2 + pad
     : Math.abs(q.x) <= o.w / 2 + pad && Math.abs(q.y) <= o.h / 2 + pad;
@@ -220,7 +221,7 @@ export function endpoint(o: Geometry, end: 0 | 1): Vec {
     o,
     o.kind === "rod" && o.h > o.w
       ? { x: 0, y: ((end ? 1 : -1) * o.h) / 2 }
-      : { x: ((end ? 1 : -1) * o.w) / 2, y: o.kind === "surface" ? -o.h / 2 : 0 },
+      : { x: ((end ? 1 : -1) * o.w) / 2, y: 0 },
   );
 }
 export function resolve(
@@ -529,7 +530,7 @@ function migrate(s: Record<string, unknown>): Scene {
     if (body(fresh))
       Object.assign(fresh, {
         mass: o.mass,
-        mu: o.mu,
+        mu: typeof o.mu === "number" ? o.mu : (o.kind === "surface" ? 0.3 : 0),
         restitution: o.restitution,
         vx: o.vx,
         vy: o.vy,
@@ -585,6 +586,36 @@ export function validate(value: unknown): Scene {
     s = migrate(s as unknown as Record<string, unknown>);
   if (s.version !== 2 || s.items.length > 200)
     throw Error("Нужна версия 2, не более 200 объектов");
+  const surfaceOffsets = new Map<string, number>();
+  const normalizedItems = s.items.map(o => {
+    if (o.kind !== "surface") return o;
+    if (o.h !== undefined && (!num(o.h) || o.h < 0.001)) throw Error("Неверная геометрия поверхности");
+    const surface = { ...o };
+    const oldThickness = typeof o.h === "number" ? o.h : 0.001;
+    const offset = oldThickness > 0.001 ? oldThickness / 2 : 0;
+    if (offset) surfaceOffsets.set(o.id, offset);
+    delete surface.trajectory;
+    return { ...surface, x: o.x + Math.sin(o.angle) * offset, y: o.y - Math.cos(o.angle) * offset, h: 0.001, fixed: true, mass: 0, mu: typeof o.mu === "number" ? o.mu : 0.3, restitution: typeof o.restitution === "number" ? o.restitution : 0, vx: 0, vy: 0, omega: 0 };
+  });
+  const shiftSurfaceAnchor = (anchor: Attachment | null): Attachment | null => {
+    const offset = anchor && surfaceOffsets.get(anchor.id);
+    return anchor && offset ? { ...anchor, local: { ...anchor.local, y: anchor.local.y + offset } } : anchor;
+  };
+  s = { ...s, items: normalizedItems.map(o => {
+    if (effect(o)) return o;
+    const ends = o.ends.map(shiftSurfaceAnchor) as Geometry["ends"];
+    return connector(o) ? { ...o, ends, bindings: o.bindings.map(shiftSurfaceAnchor).filter((a): a is Attachment => !!a) } : { ...o, ends };
+  }) };
+  if (surfaceOffsets.size && s.variables && s.bindings) {
+    const shiftedValues = new Map<string, number>();
+    for (const surface of s.items) if (surface.kind === "surface" && surfaceOffsets.has(surface.id)) {
+      for (const key of ["x", "y"] as const) {
+        const id = s.bindings[`${surface.id}:${key}`];
+        if (id) shiftedValues.set(id, surface[key]);
+      }
+    }
+    s = { ...s, variables: s.variables.map(v => shiftedValues.has(v.id) ? { ...v, value: shiftedValues.get(v.id)! } : v) };
+  }
   if (s.variables !== undefined) {
     if (!Array.isArray(s.variables) || s.variables.length > 10000) throw Error('Некорректный список переменных');
     const variableIds = new Set<string>(), symbols = new Set<string>();
@@ -595,15 +626,18 @@ export function validate(value: unknown): Scene {
         throw Error('Некорректная переменная');
       variableIds.add(v.id); symbols.add(v.symbol);
       if (v.auto !== undefined && typeof v.auto !== 'boolean') throw Error('Некорректная переменная');
+      if (v.mode !== undefined && !['number', 'range', 'graph'].includes(v.mode)) throw Error('Некорректный режим переменной');
       if (v.displayUnit !== undefined && (typeof v.displayUnit !== 'string' || v.displayUnit.length > 30)) throw Error('Некорректная единица измерения');
       if (v.visibilityLocked !== undefined && typeof v.visibilityLocked !== 'boolean') throw Error('Некорректная видимость переменной');
       if (v.derived && (typeof v.derived.itemId !== 'string' || !Number.isInteger(v.derived.index) || v.derived.index < 0 || v.derived.index >= 20 || !s.items.some(o => o.id === v.derived!.itemId && body(o))))
         throw Error('Некорректная вычисляемая переменная');
       if (v.range && (!num(v.range.min) || !num(v.range.max) || !num(v.range.step) || v.range.min >= v.range.max || v.range.step <= 0))
         throw Error('Некорректный диапазон');
+      if (v.mode === 'range' && !v.range) throw Error('Для режима диапазона нужны границы');
       if (v.graph && (typeof v.graph.source !== 'string' || !Array.isArray(v.graph.points) || v.graph.points.length < 2 || v.graph.points.length > 500 ||
           v.graph.points.some((p, i) => !num(p.x) || !num(p.y) || (p.inY !== undefined && !num(p.inY)) || (p.outY !== undefined && !num(p.outY)) || (i > 0 && p.x <= v.graph!.points[i-1].x))))
         throw Error('Некорректный график');
+      if (v.mode === 'graph' && !v.graph) throw Error('Для режима графика нужна кривая');
     }
     if (s.variables.some(v => v.graph && v.graph.source !== 'time' && !variableIds.has(v.graph.source))) throw Error('Отсутствует переменная графика');
     const byId = new Map(s.variables.map(v => [v.id, v]));
@@ -717,4 +751,12 @@ export function validate(value: unknown): Scene {
   return JSON.parse(
     JSON.stringify(numberScene(s), (key, v) => (key === "derived" || key === "forceSamples" ? undefined : v)),
   );
+}
+
+export function serializeProject(scene: Scene): string {
+  return JSON.stringify(numberScene(scene), function (this: { kind?: string }, key, value) {
+    if (key === "derived" || key === "forceSamples") return undefined;
+    if (this.kind === "surface" && ["h", "mass", "fixed", "vx", "vy", "omega", "trajectory"].includes(key)) return undefined;
+    return value;
+  }, 2);
 }

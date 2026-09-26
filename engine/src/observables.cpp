@@ -13,6 +13,18 @@ void Runtime::updateObservables() {
          jointForce = body.jointImpulse * (1 / TickDuration),
          ropeForce = body.ropeImpulse * (1 / TickDuration), netForce = acceleration * body.mass,
          weight = (normalForce + frictionForce + springForce + jointForce + ropeForce) * (-1);
+    const double impulseScale = length(body.externalImpulse) + length(body.normalImpulse) +
+                                length(body.frictionImpulse) + length(body.springImpulse) +
+                                length(body.jointImpulse) + length(body.ropeImpulse);
+    const double accelerationRoundoff =
+        64 * std::numeric_limits<double>::epsilon() *
+        (length(body.velocity) + length(beforeVelocity[i]) + impulseScale * body.inverseMass()) /
+        TickDuration;
+    if (std::abs(acceleration.x) <= accelerationRoundoff)
+      acceleration.x = 0;
+    if (std::abs(acceleration.y) <= accelerationRoundoff)
+      acceleration.y = 0;
+    netForce = acceleration * body.mass;
     double values[] = {acceleration.x,
                        acceleration.y,
                        gravityForce.x,

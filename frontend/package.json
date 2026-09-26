@@ -1,7 +1,7 @@
 {
   "name": "sandbox",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
   "scripts": {
     "test": "node ../engine/build-wasm.mjs && node tests/check.mjs && node tests/variables.mjs && node tests/wasm.mjs && node tests/worker.mjs",
@@ -16,17 +16,14 @@
   },
   "dependencies": {
     "@phosphor-icons/react": "^2.1.10",
-    "d3-selection": "^3.0.0",
-    "d3-zoom": "^3.0.0",
-    "downshift": "^9.4.0",
+    "echarts": "^6.1.0",
     "react": "^19.2.8",
+    "react-aria-components": "^1.21.1",
     "react-dom": "^19.2.8"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.3",
     "@tauri-apps/cli": "^2.11.5",
-    "@types/d3-selection": "^3.0.12",
-    "@types/d3-zoom": "^3.0.8",
     "@types/node": "^24.13.3",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",

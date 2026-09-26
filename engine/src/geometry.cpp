@@ -1,9 +1,6 @@
 #include "geometry.hpp"
 
-Vec2 contactCenter(const Body &body) {
-  return body.kind == BodyKind::Surface ? body.position - body.axis(1) * (body.height / 2)
-                                        : body.position;
-}
+Vec2 contactCenter(const Body &body) { return body.position; }
 double contactHeight(const Body &body) { return body.kind == BodyKind::Surface ? 0 : body.height; }
 double projectedRadius(const Body &body, Vec2 axis) {
   if (body.round())

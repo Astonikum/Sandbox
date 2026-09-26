@@ -74,7 +74,7 @@ console.log('PASS actual Worker drag preserves the grabbed point and rotates off
 messages.length = 0;
 const graphed = ensureVariables(structuredClone(initial));
 const massId = graphed.bindings[bindingKey('2', 'mass')];
-graphed.variables.find(v => v.id === massId).graph = { source: 'time', points: [{ x: 0, y: 1 }, { x: 1, y: 2 }] };
+Object.assign(graphed.variables.find(v => v.id === massId), { mode: 'graph', graph: { source: 'time', points: [{ x: 0, y: 1 }, { x: 1, y: 2 }] } });
 await self.onmessage({ data: { type: 'init', scene: graphed, mode: 'dynamic' } });
 for (let i = 0; i < 60; i++) await self.onmessage({ data: { type: 'frame', elapsed: 1 / 60, drag: null, edits: [] } });
 frame = messages.at(-1);
@@ -84,10 +84,10 @@ console.log('PASS actual Worker graph drives mass over simulation time');
 messages.length = 0;
 const dependent = ensureVariables(structuredClone(initial));
 dependent.items.find(o => o.id === '2').vx = 1;
-dependent.variables.find(v => v.id === dependent.bindings[bindingKey('2', 'mass')]).graph = {
+Object.assign(dependent.variables.find(v => v.id === dependent.bindings[bindingKey('2', 'mass')]), { mode: 'graph', graph: {
   source: dependent.bindings[bindingKey('2', 'x')],
   points: [{ x: 0, y: 1 }, { x: 1, y: 2 }],
-};
+} });
 await self.onmessage({ data: { type: 'init', scene: dependent, mode: 'dynamic' } });
 for (let i = 0; i < 60; i++) await self.onmessage({ data: { type: 'frame', elapsed: 1 / 60, drag: null, edits: [] } });
 frame = messages.at(-1);
@@ -97,7 +97,7 @@ console.log('PASS actual Worker graph follows another live variable');
 messages.length = 0;
 const oriented = ensureVariables(structuredClone(initial));
 const angleId = oriented.bindings[bindingKey('3', 'vector.angle')];
-oriented.variables.find(v => v.id === angleId).graph = { source: 'time', points: [{ x: 0, y: 270 }, { x: 1, y: 90 }] };
+Object.assign(oriented.variables.find(v => v.id === angleId), { mode: 'graph', graph: { source: 'time', points: [{ x: 0, y: 270 }, { x: 1, y: 90 }] } });
 await self.onmessage({ data: { type: 'init', scene: oriented, mode: 'dynamic' } });
 for (let i = 0; i < 60; i++) await self.onmessage({ data: { type: 'frame', elapsed: 1 / 60, drag: null, edits: [] } });
 frame = messages.at(-1);
@@ -110,7 +110,7 @@ messages.length = 0;
 let converted = saveVariable(ensureVariables(structuredClone(initial)), { symbol: 'speedKmh', value: 0, unit: 'км/ч' });
 const speedId = converted.variables.find(v => v.symbol === 'speedKmh').id;
 converted = bindVariable(converted, '2', 'vx', speedId);
-converted.variables.find(v => v.id === speedId).graph = { source: 'time', points: [{ x: 0, y: 0 }, { x: 1, y: 36 }] };
+Object.assign(converted.variables.find(v => v.id === speedId), { mode: 'graph', graph: { source: 'time', points: [{ x: 0, y: 0 }, { x: 1, y: 36 }] } });
 await self.onmessage({ data: { type: 'init', scene: converted, mode: 'dynamic' } });
 for (let i = 0; i < 60; i++) await self.onmessage({ data: { type: 'frame', elapsed: 1 / 60, drag: null, edits: [] } });
 frame = messages.at(-1);

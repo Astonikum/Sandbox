@@ -1,0 +1,101 @@
+{
+  "fill": {
+    "solid": "srgb:0.9373,0.9451,0.9608,1"
+  },
+  "fill-specializations": [
+    {
+      "appearance": "dark",
+      "value": {
+        "solid": "srgb:0.1176,0.1176,0.1804,1"
+      }
+    },
+    {
+      "appearance": "tinted",
+      "value": {
+        "solid": "srgb:0.36,0.36,0.4,1"
+      }
+    }
+  ],
+  "groups": [
+    {
+      "layers": [
+        {
+          "fill": {
+            "solid": "srgb:0.8667,0.4706,0.4706,1"
+          },
+          "glass": false,
+          "fill-specializations": [
+            {
+              "appearance": "dark",
+              "value": {
+                "solid": "srgb:0.9529,0.5451,0.6588,1"
+              }
+            },
+            {
+              "appearance": "tinted",
+              "value": {
+                "solid": "srgb:0.92,0.92,0.92,1"
+              }
+            }
+          ],
+          "image-name": "01-circle.svg",
+          "name": "Circle"
+        },
+        {
+          "fill": {
+            "solid": "srgb:0.298,0.3098,0.4118,1"
+          },
+          "glass": false,
+          "fill-specializations": [
+            {
+              "appearance": "dark",
+              "value": {
+                "solid": "srgb:0.804,0.8392,0.9569,1"
+              }
+            },
+            {
+              "appearance": "tinted",
+              "value": {
+                "solid": "srgb:1,1,1,1"
+              }
+            }
+          ],
+          "image-name": "02-arrow.svg",
+          "name": "Arrow"
+        },
+        {
+          "fill": {
+            "solid": "srgb:0.1255,0.6235,0.7098,1"
+          },
+          "glass": false,
+          "fill-specializations": [
+            {
+              "appearance": "dark",
+              "value": {
+                "solid": "srgb:0.5373,0.8667,0.9216,1"
+              }
+            },
+            {
+              "appearance": "tinted",
+              "value": {
+                "solid": "srgb:0.82,0.82,0.82,1"
+              }
+            }
+          ],
+          "image-name": "03-square.svg",
+          "name": "Square"
+        }
+      ],
+      "lighting": "individual",
+      "name": "Sandbox",
+      "shadow": {
+        "kind": "none",
+        "opacity": 0
+      },
+      "specular": false
+    }
+  ],
+  "supported-platforms": {
+    "squares": "shared"
+  }
+}

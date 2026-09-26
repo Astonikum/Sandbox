@@ -188,7 +188,11 @@ ContactImpulses solveContactImpulses(const Body &bodyA, const Body &bodyB, Vec2 
         continue;
       normalImpulses[0] = candidateNormal[0];
       normalImpulses[1] = candidateNormal[1];
-      tangentImpulse = candidateTangent;
+      const double load = candidateNormal[0] + candidateNormal[1];
+      const double roundoff = 64 * std::numeric_limits<double>::epsilon() * load;
+      tangentImpulse = std::abs(candidateTangent) <= roundoff
+                           ? 0
+                           : std::clamp(candidateTangent, -friction * load, friction * load);
       solved = true;
     }
   }
@@ -291,6 +295,22 @@ void ContactSolver::beginStep(double duration) {
   dt = duration;
   for (auto &[source, contact] : contacts)
     contact.active = false;
+}
+void ContactSolver::warmStart(std::vector<Body> &bodies) {
+  for (auto &[source, contact] : contacts) {
+    if (contact.bodyA >= bodies.size() || contact.bodyB >= bodies.size())
+      continue;
+    prepareContact(bodies[contact.bodyA], bodies[contact.bodyB], contact, dt);
+  }
+  for (auto &[source, contact] : contacts)
+    if (contact.active)
+      solveVelocity(bodies[contact.bodyA], bodies[contact.bodyB], contact);
+}
+void ContactSolver::prepare(std::vector<Body> &bodies, size_t first, size_t second, int source) {
+  auto &contact = contacts[source];
+  contact.bodyA = first;
+  contact.bodyB = second;
+  prepareContact(bodies[first], bodies[second], contact, dt);
 }
 void ContactSolver::solve(std::vector<Body> &bodies, size_t first, size_t second, int source) {
   auto &contact = contacts[source];

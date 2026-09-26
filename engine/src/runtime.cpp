@@ -46,9 +46,14 @@ double Runtime::maximumStepDuration() {
       if (boundsA.y1 < boundsB.y0 || boundsB.y1 < boundsA.y0 ||
           (bodyA.inverseMass() == 0 && body.inverseMass() == 0))
         continue;
-      maximumDt =
-          std::min(maximumDt, .2 * std::min({bodyA.width, bodyA.height, body.width, body.height}) /
-                                  std::max(boundsA.speed + boundsB.speed, 1e-9));
+      const double sizeA = bodyA.kind == BodyKind::Surface ? std::numeric_limits<double>::infinity()
+                                                           : std::min(bodyA.width, bodyA.height),
+                   sizeB = body.kind == BodyKind::Surface ? std::numeric_limits<double>::infinity()
+                                                          : std::min(body.width, body.height),
+                   collisionSize = std::min(sizeA, sizeB);
+      if (std::isfinite(collisionSize))
+        maximumDt = std::min(maximumDt, .2 * collisionSize /
+                                             std::max(boundsA.speed + boundsB.speed, 1e-9));
     }
   for (const auto &link : links)
     if (link.kind == LinkKind::Spring) {

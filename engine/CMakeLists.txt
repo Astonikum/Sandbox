@@ -13,7 +13,7 @@ add_executable(physics src/main.cpp)
 target_link_libraries(physics PRIVATE mechanics_core)
 
 enable_testing()
-foreach(suite mechanics conservation rest runtime)
+foreach(suite mechanics conservation rest runtime stability)
   add_executable(test_${suite} tests/${suite}.cpp)
   target_link_libraries(test_${suite} PRIVATE mechanics_core)
   if(MSVC)

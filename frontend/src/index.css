@@ -1,8 +1,40 @@
 @import "tailwindcss";
 :root {
+  --ctp-rosewater: #dc8a78;
+  --ctp-flamingo: #dd7878;
+  --ctp-pink: #ea76cb;
+  --ctp-mauve: #8839ef;
+  --ctp-red: #d20f39;
+  --ctp-maroon: #e64553;
+  --ctp-peach: #fe640b;
+  --ctp-yellow: #df8e1d;
+  --ctp-green: #40a02b;
+  --ctp-teal: #179299;
+  --ctp-sky: #04a5e5;
+  --ctp-sapphire: #209fb5;
+  --ctp-blue: #1e66f5;
+  --ctp-lavender: #7287fd;
+  --ctp-text: #4c4f69;
+  --ctp-subtext1: #5c5f77;
+  --ctp-subtext0: #6c6f85;
+  --ctp-overlay2: #7c7f93;
+  --ctp-overlay1: #8c8fa1;
+  --ctp-overlay0: #9ca0b0;
+  --ctp-surface2: #acb0be;
+  --ctp-surface1: #bcc0cc;
+  --ctp-surface0: #ccd0da;
+  --ctp-base: #eff1f5;
+  --ctp-mantle: #e6e9ef;
+  --ctp-crust: #dce0e8;
+  --ui-hover: color-mix(in srgb, var(--ctp-surface0) 42%, var(--ctp-base));
+  --ui-selection: color-mix(in srgb, var(--ctp-blue) 11%, var(--ctp-base));
+  --ui-border-subtle: color-mix(in srgb, var(--ctp-surface0) 55%, var(--ctp-base));
+  --ui-danger-soft: color-mix(in srgb, var(--ctp-red) 9%, var(--ctp-base));
+  --ui-danger-border: color-mix(in srgb, var(--ctp-red) 28%, var(--ctp-surface0));
+  --ui-shadow: color-mix(in srgb, var(--ctp-text) 16%, transparent);
   font-family: Inter, "Segoe UI", Arial, sans-serif;
-  color: #202020;
-  background: #fff;
+  color: var(--ctp-text);
+  background: var(--ctp-base);
   font-synthesis: none;
   font-size: 18px;
   font-weight: 400;
@@ -31,15 +63,15 @@ button:disabled {
   cursor: not-allowed;
 }
 button:hover:not(:disabled) {
-  background: #ececea;
+  background: var(--ui-hover);
 }
 button:active:not(:disabled) {
-  background: #ddd;
+  background: var(--ctp-surface0);
 }
 button:focus-visible,
 input:focus-visible,
 summary:focus-visible {
-  outline: 2px solid #555;
+  outline: 2px solid var(--ctp-blue);
   outline-offset: 2px;
 }
 input {
@@ -64,5 +96,6 @@ button {
   transition: background 0.12s;
 }
 ::selection {
-  background: #ddd;
+  color: var(--ctp-text);
+  background: var(--ctp-surface0);
 }

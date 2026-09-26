@@ -1,6 +1,6 @@
 #pragma once
 #include "body.hpp"
-#include <unordered_map>
+#include <map>
 
 struct ContactState {
   Vec2 normal{}, points[2]{}, offsetA[2]{}, offsetB[2]{};
@@ -13,12 +13,14 @@ struct ContactState {
 };
 
 class ContactSolver {
-  std::unordered_map<int, ContactState> contacts;
+  std::map<int, ContactState, std::greater<int>> contacts;
   double dt = 0;
 
 public:
   void clear() { contacts.clear(); }
   void beginStep(double duration);
+  void warmStart(std::vector<Body> &bodies);
+  void prepare(std::vector<Body> &bodies, size_t first, size_t second, int source);
   void solve(std::vector<Body> &bodies, size_t first, size_t second, int source);
   void finishStep(std::vector<Body> &bodies);
 };

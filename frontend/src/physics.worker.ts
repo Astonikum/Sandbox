@@ -2,7 +2,7 @@ import { body, effect, targets } from "./model";
 import type { BodyItem, Scene, Patch, Effect } from "./model";
 import { linksFor } from "./physics";
 import { FixedClock, STEP } from "./wasm-api";
-import { convertUnit, fields as variableFields, readField, writeField, valueAt } from './variables';
+import { convertUnit, fields as variableFields, readField, variableMode, writeField, valueAt } from './variables';
 import type { WasmEngine } from "./wasm-api";
 let engine: WasmEngine,
   scene: Scene,
@@ -128,7 +128,7 @@ function edit(id: string, patch: Patch) {
 }
 function applyGraphs(time: number) {
   const variables = scene.variables;
-  if (!variables?.some(v => v.graph)) return;
+  if (!variables?.some(v => variableMode(v) === 'graph' && v.graph)) return;
   check(engine._engine_sample(time));
   const output = engine.HEAPF64.subarray(engine._engine_output() / 8, engine._engine_output() / 8 + bodies.length * 6);
   const observables = engine.HEAPF64.subarray(engine._engine_observables() / 8, engine._engine_observables() / 8 + bodies.length * 20);
@@ -136,7 +136,7 @@ function applyGraphs(time: number) {
     const v = variables.find(v => v.id === id);
     if (!v) throw Error('Отсутствует переменная графика');
     if (seen.has(id)) throw Error('Цикл зависимостей графиков');
-    if (v.graph) { seen.add(id); return valueAt(v.graph.points, v.graph.source === 'time' ? time : value(v.graph.source, seen)); }
+    if (variableMode(v) === 'graph' && v.graph) { seen.add(id); return valueAt(v.graph.points, v.graph.source === 'time' ? time : value(v.graph.source, seen)); }
     if (v.derived) {
       const index = bodies.findIndex(b => b.id === v.derived!.itemId);
       if (index < 0) return 0;
@@ -157,7 +157,7 @@ function applyGraphs(time: number) {
     return v.value;
   };
   for (const v of variables) {
-    if (!v.graph) continue;
+    if (variableMode(v) !== 'graph' || !v.graph) continue;
     const next = value(v.id);
     if (!Number.isFinite(next) || Math.abs(next) > 1e5) throw Error(`График ${v.symbol}: значение вне диапазона`);
     if (next === v.value) continue;
@@ -171,7 +171,7 @@ function applyGraphs(time: number) {
       const physical = field ? convertUnit(next, v.unit, field.unit) : next;
       if (field && (physical < (field.min ?? -1e5) || physical > (field.max ?? 1e5))) throw Error(`График ${v.symbol}: значение не подходит свойству`);
       const updated = writeField(o, key, physical);
-      edit(itemId, effect(updated) ? { vector: updated.vector } : key.startsWith('velocity.') && body(updated) ? { vx: updated.vx, vy: updated.vy } : { [key]: physical });
+      edit(itemId, effect(updated) ? { vector: updated.vector } : key.startsWith('velocity.') && body(updated) ? { vx: updated.vx, vy: updated.vy } : key === 'radius' ? { w: physical * 2, h: physical * 2 } : { [key]: physical });
     }
   }
 }

@@ -185,6 +185,7 @@ const context = new Proxy({}, {
   set: () => true,
 });
 globalThis.devicePixelRatio = 1;
+globalThis.getComputedStyle = () => ({ getPropertyValue: () => "" });
 const canvas = { width: 0, height: 0, getBoundingClientRect: () => ({ width: 800, height: 600 }), getContext: () => context };
 const moving = make("rect", "moving");
 moving.vx = 1;

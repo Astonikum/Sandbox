@@ -98,6 +98,10 @@ const sides: Vec[] = [
 export const twoEnds = (o: Geometry) => ["rod", "surface", "spring", "rope"].includes(o.kind);
 export function handles(o: Geometry, items: Item[]): Vec[] {
   if (twoEnds(o)) return [endAt(o, 0, items), endAt(o, 1, items)];
+  if (o.kind === "circle") return [
+    { x: o.x - o.w / 2, y: o.y }, { x: o.x + o.w / 2, y: o.y },
+    { x: o.x, y: o.y - o.h / 2 }, { x: o.x, y: o.y + o.h / 2 },
+  ];
   return sides.map(({ x, y }) => world(o, { x: x * o.w / 2, y: y * o.h / 2 }));
 }
 export function rotationHandle(o: Geometry, scale: number): Vec | null {
@@ -129,6 +133,23 @@ export function pulleyPath(a: Vec, b: Vec, p: Geometry) {
 }
 const vectorOffsets = new WeakMap<HTMLCanvasElement, Map<string, Vec>>();
 const vectorLabelSlots = new WeakMap<HTMLCanvasElement, Map<string, { slot: number; overlap: number }>>();
+type CanvasPalette = { base: string; text: string; surface1: string; crust: string; blue: string; mauve: string };
+const canvasPalettes = new WeakMap<HTMLCanvasElement, CanvasPalette>();
+function paletteFor(canvas: HTMLCanvasElement): CanvasPalette {
+  let palette = canvasPalettes.get(canvas);
+  if (!palette) {
+    const styles = getComputedStyle(canvas);
+    const read = (name: string, fallback: string) => styles.getPropertyValue(`--ctp-${name}`).trim() || fallback;
+    palette = {
+      base: read("base", "#eff1f5"), text: read("text", "#4c4f69"),
+      surface1: read("surface1", "#bcc0cc"),
+      crust: read("crust", "#dce0e8"), blue: read("blue", "#1e66f5"),
+      mauve: read("mauve", "#8839ef"),
+    };
+    canvasPalettes.set(canvas, palette);
+  }
+  return palette;
+}
 export function paint(
   canvas: HTMLCanvasElement,
   scene: Scene,
@@ -140,7 +161,8 @@ export function paint(
   hover: string | null = null,
   showAuto = false,
 ) {
-  const rect = canvas.getBoundingClientRect(),
+  const palette = paletteFor(canvas),
+    rect = canvas.getBoundingClientRect(),
     dpr = devicePixelRatio || 1;
   const width = Math.round(rect.width * dpr),
     height = Math.round(rect.height * dpr);
@@ -155,7 +177,7 @@ export function paint(
   c.translate(rect.width / 2 - camera.x * z, rect.height / 2 - camera.y * z);
   c.scale(z, z);
   c.lineWidth = 1.7 / z;
-  c.strokeStyle = "#111";
+  c.strokeStyle = palette.text;
   c.lineJoin = "round";
   const line = (a: Vec, b: Vec) => {
     c.beginPath();
@@ -163,7 +185,7 @@ export function paint(
     c.lineTo(b.x, b.y);
     c.stroke();
   };
-  const dot = (p: Vec, r: number, fill = "white") => {
+  const dot = (p: Vec, r: number, fill = palette.base) => {
     c.beginPath();
     c.arc(p.x, p.y, r, 0, Math.PI * 2);
     c.fillStyle = fill;
@@ -171,7 +193,7 @@ export function paint(
     c.stroke();
   };
   const text = (s: string, p: Vec, size = 15) => {
-    c.fillStyle = "#111";
+    c.fillStyle = palette.text;
     c.font = `italic ${size / z}px Georgia`;
     c.fillText(s, p.x, p.y);
   };
@@ -182,7 +204,7 @@ export function paint(
   };
   type Bounds = { x: number; y: number; w: number; h: number };
   const geometryBounds = new Map(scene.items.filter(geo).map((o) => {
-    const points = ["spring", "rope"].includes(o.kind)
+    const points = ["spring", "rope", "surface"].includes(o.kind)
       ? [endAt(o, 0, scene.items), endAt(o, 1, scene.items)]
       : [{ x: -o.w / 2, y: -o.h / 2 }, { x: o.w / 2, y: -o.h / 2 },
          { x: -o.w / 2, y: o.h / 2 }, { x: o.w / 2, y: o.h / 2 }].map(p => world(o, p));
@@ -288,6 +310,7 @@ export function paint(
       end.x = origin.x + dx; end.y = origin.y + dy;
     }
     c.save();
+    c.strokeStyle = palette.mauve;
     c.globalAlpha = Math.min(1, length * z / 3);
     line(origin, end);
     c.save();
@@ -298,7 +321,7 @@ export function paint(
     c.lineTo(-head, -head * 3 / 8);
     c.lineTo(-head, head * 3 / 8);
     c.closePath();
-    c.fillStyle = "#111";
+    c.fillStyle = palette.mauve;
     c.fill();
     c.restore();
     const captionWidth = labelWidth(name, id);
@@ -314,7 +337,7 @@ export function paint(
   };
   if (grid) {
     c.save();
-    c.strokeStyle = "#e2e2df";
+    c.strokeStyle = palette.crust;
     c.lineWidth = 0.6 / z;
     const step = z < 8 ? 10 ** Math.ceil(Math.log10(8 / z)) : 1,
       left = camera.x - rect.width / (2 * z),
@@ -350,9 +373,9 @@ export function paint(
       c.translate(o.x, o.y);
       c.rotate(o.angle);
       if (o.kind === "circle" || o.kind === "pulley") {
-        dot({ x: 0, y: 0 }, o.w / 2, "#cececa");
+        dot({ x: 0, y: 0 }, o.w / 2, palette.surface1);
         if (o.kind === "pulley") {
-          dot({ x: 0, y: 0 }, Math.max(0.002, o.w / 2 - 4 / z), "#eee");
+          dot({ x: 0, y: 0 }, Math.max(0.002, o.w / 2 - 4 / z), palette.base);
           for (let i = 0; i < 4; i++) {
             const a = (i * Math.PI) / 2;
             line(
@@ -365,21 +388,21 @@ export function paint(
       } else {
         c.fillStyle =
           o.kind === "surface"
-            ? "white"
+            ? palette.base
             : o.kind === "rod"
-              ? "#171717"
-              : "#cececa";
+              ? palette.text
+              : palette.surface1;
         if (o.kind !== "surface") {
           c.fillRect(-o.w / 2, -o.h / 2, o.w, o.h);
           c.strokeRect(-o.w / 2, -o.h / 2, o.w, o.h);
         }
         if (o.kind === "surface") {
-          line({ x: -o.w / 2, y: -o.h / 2 }, { x: o.w / 2, y: -o.h / 2 });
+          line({ x: -o.w / 2, y: 0 }, { x: o.w / 2, y: 0 });
           c.save();
           c.lineWidth = 1 / z;
           const spacing = Math.max(0.08, 9 / z);
           for (let x = -o.w / 2; x < o.w / 2; x += spacing)
-            line({ x, y: -o.h / 2 }, { x: x - 6 / z, y: -o.h / 2 + 7 / z });
+            line({ x, y: 0 }, { x: x - 6 / z, y: 7 / z });
           c.restore();
         }
       }
@@ -392,7 +415,7 @@ export function paint(
     } else if (o.kind === "bearing") {
       const p = center(o, scene.items);
       dot(p, o.w / 2);
-      dot(p, Math.min(2 / z, o.w / 4), "#111");
+      dot(p, Math.min(2 / z, o.w / 4), palette.text);
       if (o.fixed) {
         c.save();
         c.lineWidth = 1 / z;
@@ -450,6 +473,7 @@ export function paint(
     }
     if (o.id === selected || chosenTargets.includes(o.id) || o.id === hover) {
       c.save();
+      c.strokeStyle = palette.blue;
       c.lineWidth = 1 / z;
       c.setLineDash(o.id === hover ? [2 / z, 3 / z] : [4 / z, 4 / z]);
       if (o.kind === "bearing") {
@@ -462,6 +486,10 @@ export function paint(
         );
       } else if (["spring", "rope"].includes(o.kind)) {
         line(endAt(o, 0, scene.items), endAt(o, 1, scene.items));
+      } else if (o.kind === "circle") {
+        c.beginPath();
+        c.arc(o.x, o.y, o.w / 2 + 5 / z, 0, Math.PI * 2);
+        c.stroke();
       } else {
         c.translate(o.x, o.y);
         c.rotate(o.angle);
@@ -480,7 +508,7 @@ export function paint(
           text("↻", { x: turn.x - 6 / z, y: turn.y + 5 / z }, 17);
         }
         for (const p of handles(o, scene.items)) {
-          c.fillStyle = "white";
+          c.fillStyle = palette.base;
           c.fillRect(p.x - 3 / z, p.y - 3 / z, 6 / z, 6 / z);
           c.strokeRect(p.x - 3 / z, p.y - 3 / z, 6 / z, 6 / z);
         }
@@ -565,8 +593,8 @@ export function resized(
       length = Math.hypot(b.x - a.x, b.y - a.y);
     if (length < (o.kind === "rod" ? 0.12 : 0.01)) return {};
     const angle = Math.atan2(b.y - a.y, b.x - a.x),
-      h = o.kind === "rod" ? 0.12 : o.h,
-      offset = o.kind === "surface" ? h / 2 : 0;
+      h = o.kind === "surface" ? 0.001 : o.kind === "rod" ? 0.12 : o.h,
+      offset = 0;
     return {
       x: (a.x + b.x) / 2 - Math.sin(angle) * offset,
       y: (a.y + b.y) / 2 + Math.cos(angle) * offset,
@@ -574,7 +602,7 @@ export function resized(
       ends: o.ends.map((a, i) => (i === handle ? null : a)) as Geometry["ends"],
     };
   }
-  const side = sides[handle], q = local(o, p),
+  const side = sides[o.kind === "circle" ? [4, 5, 6, 7][handle] : handle], q = local(o, p),
     anchor = { x: -side.x * o.w / 2, y: -side.y * o.h / 2 },
     round = ["circle", "pulley", "bearing"].includes(o.kind);
   let w = side.x ? Math.max(0.01, side.x * (q.x - anchor.x)) : o.w,

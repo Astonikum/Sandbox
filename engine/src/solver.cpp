@@ -65,9 +65,14 @@ void Solver::step(std::vector<Body> &bodies, const std::vector<Link> &links,
   }
   integrateForces(bodies, forces, gravity, dt, draggedBody, target, localGrab);
   applySprings(bodies, links, dt);
+  contacts.beginStep(dt);
+  contacts.warmStart(bodies);
   integratePositions(bodies, dt);
   broadPhase.prepare(bodies, links);
-  contacts.beginStep(dt);
+  for (auto [first, second] : broadPhase.update(bodies)) {
+    const int source = -1 - static_cast<int>(first * bodies.size() + second);
+    contacts.prepare(bodies, first, second, source);
+  }
   constexpr int iterations = 24;
   constexpr int broadPhaseInterval = 4;
   for (int iteration = 0; iteration < iterations; ++iteration) {
