@@ -20,6 +20,50 @@ static void advance(Runtime &runtime, int ticks) {
 
 int main() {
   auto runtime = std::make_unique<Runtime>();
+  for (double angle : {0., .23, 1.5707963267948966}) {
+    const Vec2 x{std::cos(angle), std::sin(angle)}, y = perpendicular(x);
+    std::vector<Row> enclosure{{BodyKind::Rectangle, 0, 0, 1, 1, angle, 1, .5, 0, 0, 0, 0, 0, 0, 0, 0, 0}};
+    for (int side : {-1, 1}) {
+      enclosure.push_back({BodyKind::Surface, side * .6 * y.x, side * .6 * y.y, 2, .001, angle, 0, .5, 0, 0, 0, 0, 1, 0, 0, 0, 0});
+      enclosure.push_back({BodyKind::Surface, side * .6 * x.x, side * .6 * x.y, 2, .001, angle + 1.5707963267948966, 0, .5, 0, 0, 0, 0, 1, 0, 0, 0, 0});
+    }
+    load(*runtime, enclosure, 0);
+    advance(*runtime, 120);
+    for (int i = 0; i < 6; ++i) assert(std::abs(runtime->outputData()[i] - (i == 2 ? angle : 0)) < 1e-10);
+    load(*runtime, enclosure);
+    advance(*runtime, 1);
+    assert(runtime->outputData()[4] > .04);
+    assert(std::abs(runtime->outputData()[0]) < 1e-10);
+    advance(*runtime, 480);
+    const Vec2 position{runtime->outputData()[0], runtime->outputData()[1]};
+    assert(std::abs(dot(position, x)) < .101);
+    assert(std::abs(dot(position, y)) < .101);
+  }
+  std::cout << "PASS enclosed box: initial clearance, free fall and rotated surface contacts\n";
+  {
+    const std::vector<Row> scene{
+      {BodyKind::Rectangle, 0, 0, 1, 1, 0, 1, .5, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+      {BodyKind::Rod, 1.5, 0, 2, .12, 0, 1, .5, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+      {BodyKind::Surface, .6, 0, 3, .001, 1.5707963267948966, 0, .5, 0, 0, 0, 0, 1, 0, 0, 0, 0},
+      {BodyKind::Surface, -.6, 0, 3, .001, 1.5707963267948966, 0, .5, 0, 0, 0, 0, 1, 0, 0, 0, 0},
+      {BodyKind::Surface, 0, .6, 3, .001, 0, 0, .5, 0, 0, 0, 0, 1, 0, 0, 0, 0},
+      {BodyKind::Surface, 0, -.6, 3, .001, 0, 0, .5, 0, 0, 0, 0, 1, 0, 0, 0, 0}};
+    load(*runtime, scene);
+    double *link = runtime->inputData() + MaxBodies * BodyStride;
+    const std::array<double, LinkStride> pin{LinkKind::Hinge, 0, 1, 0, 0, .5, 0, -1, 0, 0, 0, 0, -1, 0, 0, 0};
+    std::copy(pin.begin(), pin.end(), link);
+    assert(runtime->reset(scene.size(), 1, 9.81) == Status::Ok);
+    advance(*runtime, 1);
+    assert(runtime->outputData()[4] > .04);
+    assert(std::abs(runtime->outputData()[0]) < 1e-10);
+    advance(*runtime, 240);
+    const double *state = runtime->outputData();
+    assert(state[1] <= .101);
+    const Vec2 anchorA = Vec2{state[0], state[1]} + rotated({.5, 0}, state[2]),
+               anchorB = Vec2{state[6], state[7]} + rotated({-1, 0}, state[8]);
+    assert(length(anchorA - anchorB) < .001);
+  }
+  std::cout << "PASS enclosed box with bearing and non-colliding lever\n";
   std::vector<Row> stack;
   for (int i = 0; i < 10; ++i)
     stack.push_back(

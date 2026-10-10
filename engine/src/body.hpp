@@ -7,7 +7,7 @@ namespace BodyKind {
 constexpr int Rectangle = 0, Circle = 1, Pulley = 5, Surface = 9, Rod = 10;
 }
 namespace LinkKind {
-constexpr int Hinge = 2, Spring = 3, Rope = 4, Pulley = 10, Weld = 12;
+constexpr int Hinge = 2, Spring = 3, Rope = 4, Pulley = 10, Weld = 12, SpringGuide = 13;
 }
 namespace ForceCategory {
 constexpr int None = 0, Normal = 1, Friction = 2, Spring = 3, Joint = 4, Rope = 5;
@@ -42,6 +42,10 @@ struct Body {
     }
     return i ? cachedY : cachedX;
   }
+  Vec2 rotate(Vec2 local) const {
+    const Vec2 x = axis(0);
+    return {local.x * x.x - local.y * x.y, local.x * x.y + local.y * x.x};
+  }
   double inverseMass() const { return fixed || kinematic ? 0 : 1 / mass; }
   double inverseInertia() const {
     return kinematic || (fixed && kind != BodyKind::Pulley) || mass <= 0
@@ -63,3 +67,4 @@ void recordImpulse(Body &body, Vec2 impulse, Vec2 offset, int category, int sour
 void applyImpulse(Body &body, Vec2 impulse, Vec2 offset, int category = 0, int source = 0,
                   int slot = 0);
 Vec2 pointVelocity(const Body &body, Vec2 offset);
+Vec2 springImpulse(const Body &a, const Body *b, const Link &link, Vec2 offsetA, Vec2 offsetB, double dt);

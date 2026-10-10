@@ -131,6 +131,8 @@ export function pulleyPath(a: Vec, b: Vec, p: Geometry) {
     length: Math.sqrt(da * da - r * r) + Math.sqrt(db * db - r * r) + r * arc,
   };
 }
+export const vectorPalette = ["#5B92E5", "#3BA99F", "#5A9E66", "#D19A36", "#E07A5F", "#D95D67", "#A275E3", "#C85A9B"];
+const bodyVectorColors = new WeakMap<HTMLCanvasElement, Map<string, string>>();
 const vectorOffsets = new WeakMap<HTMLCanvasElement, Map<string, Vec>>();
 const vectorLabelSlots = new WeakMap<HTMLCanvasElement, Map<string, { slot: number; overlap: number }>>();
 type CanvasPalette = { base: string; text: string; surface1: string; crust: string; blue: string; mauve: string };
@@ -159,7 +161,8 @@ export function paint(
   running: boolean,
   chosenTargets: string[] = [],
   hover: string | null = null,
-  showAuto = false,
+  showAuto = true,
+  coloredVectors = true,
 ) {
   const palette = paletteFor(canvas),
     rect = canvas.getBoundingClientRect(),
@@ -266,7 +269,16 @@ export function paint(
       { x: box.x - w - 4 / z, y: box.y + 5 / z },
     ];
   };
-  const accelerations: { origin: Vec; v: Vec; name: string; id: string }[] = [];
+  const colors = bodyVectorColors.get(canvas) ?? new Map<string, string>();
+  bodyVectorColors.set(canvas, colors);
+  for (const id of colors.keys()) if (!scene.items.some(o => body(o) && o.id === id)) colors.delete(id);
+  for (const b of scene.items.filter(body)) if (!colors.has(b.id)) {
+    const counts = vectorPalette.map(color => [...colors.values()].filter(value => value === color).length);
+    const least = Math.min(...counts), available = vectorPalette.filter((_, i) => counts[i] === least);
+    colors.set(b.id, available[Math.floor(Math.random() * available.length)]);
+  }
+  let arrowColor = palette.mauve;
+  const accelerations: { origin: Vec; v: Vec; name: string; id: string; color?: string }[] = [];
   const previousOffsets = vectorOffsets.get(canvas);
   const nextOffsets = new Map<string, Vec>();
   vectorOffsets.set(canvas, nextOffsets);
@@ -310,7 +322,8 @@ export function paint(
       end.x = origin.x + dx; end.y = origin.y + dy;
     }
     c.save();
-    c.strokeStyle = palette.mauve;
+    c.lineWidth = (coloredVectors ? 2.1 : 1.7) / z;
+    c.strokeStyle = coloredVectors ? arrowColor : palette.mauve;
     c.globalAlpha = Math.min(1, length * z / 3);
     line(origin, end);
     c.save();
@@ -321,7 +334,7 @@ export function paint(
     c.lineTo(-head, -head * 3 / 8);
     c.lineTo(-head, head * 3 / 8);
     c.closePath();
-    c.fillStyle = palette.mauve;
+    c.fillStyle = coloredVectors ? arrowColor : palette.mauve;
     c.fill();
     c.restore();
     const captionWidth = labelWidth(name, id);
@@ -517,6 +530,7 @@ export function paint(
   }
   let fieldIndex = 0;
   for (const o of scene.items.filter(effect)) {
+    arrowColor = palette.mauve;
     const affected = targets(o, scene.items);
     if (o.kind === "acceleration" && (o.gravity || o.scope === "all" || affected.length !== 1)) {
       // Shared and unassigned accelerations are field markers, not per-body
@@ -527,16 +541,18 @@ export function paint(
       continue;
     }
     for (const b of affected) {
+      arrowColor = colors.get(b.id)!;
       if (!visible(b)) continue;
       if (o.kind === "acceleration") {
         if (!b.fixed) accelerations.push({ origin: b, v: o.vector,
-          name: "aзад", id: indexLabel(o) });
-      } else if (o.kind === "force" || !running)
+          name: "aзад", id: indexLabel(o), color: arrowColor });
+      } else if (o.kind === "force" || !running || !showAuto)
         arrow(b, o.vector, o.kind === "force" ? "F" : "v", indexLabel(o));
     }
   }
   for (const b of scene.items.filter(body)) {
-    if (!visible(b) || !(running || showAuto)) continue;
+    arrowColor = colors.get(b.id)!;
+    if (!visible(b) || !showAuto) continue;
     if (running || !scene.items.some(o => effect(o) && o.kind === "velocity" && targets(o, [b]).length))
       arrow(b, { x: b.vx, y: b.vy }, "v", indexLabel(b));
     if (b.derived) {
@@ -567,7 +583,7 @@ export function paint(
       const acceleration = { x: d[0], y: d[1] };
       if (!applied.some(e => e.kind === "acceleration") ||
           applied.some(e => e.kind === "force") || b.forceSamples?.length)
-        accelerations.push({ origin: b, v: acceleration, name: "a", id: indexLabel(b) });
+        accelerations.push({ origin: b, v: acceleration, name: "a", id: indexLabel(b), color: arrowColor });
     } else {
       let x = 0,
         y = 0;
@@ -579,7 +595,7 @@ export function paint(
       arrow(b, { x, y }, "Fтяж", indexLabel(b));
     }
   }
-  for (const a of accelerations) arrow(a.origin, a.v, a.name, a.id, true);
+  for (const a of accelerations) { arrowColor = a.color ?? palette.mauve; arrow(a.origin, a.v, a.name, a.id, true); }
 }
 export function resized(
   o: Geometry,

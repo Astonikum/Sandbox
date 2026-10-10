@@ -533,3 +533,101 @@ assert.equal(engine._engine_body(1, 2, 10), 0);
 ticks(24);
 assert.ok(sample()[4] > .9);
 console.log('PASS WASM rolling rest, persistent rest, live impulse and removed support');
+
+for (const kind of [0, 1]) {
+  const launched = [...base], barrier = [...base];
+  launched[0] = kind;
+  launched[3] = launched[4] = .01;
+  barrier[0] = 9;
+  barrier[1] = .04;
+  barrier[3] = 1;
+  barrier[4] = .001;
+  barrier[5] = Math.PI / 2;
+  barrier[12] = 1;
+  reset([launched, barrier], 0, [[3, 0, -1, 5, 0, 0, 0, 0, 0, 0, 2000, 0, -1]]);
+  for (let tick = 0; tick < 8; ++tick) {
+    ticks(1);
+    assert.ok(sample()[0] <= .03502, 'spring cannot propel a body through a thin surface');
+  }
+}
+const acceleratingWall = [...base], pushed = [...base];
+acceleratingWall[0] = 9;
+acceleratingWall[3] = 1;
+acceleratingWall[4] = .001;
+acceleratingWall[5] = Math.PI / 2;
+acceleratingWall[12] = 2;
+pushed[0] = 1;
+pushed[1] = .02;
+pushed[3] = pushed[4] = .01;
+reset([acceleratingWall, pushed], 0);
+assert.equal(trajectory('5000*t^2', '0', 'pi/2'), 0);
+ticks(1);
+const pushedState = sample(engine._engine_time(), 2);
+assert.ok(pushedState[6] >= pushedState[0] + .00498, 'accelerating surface pushes the body instead of crossing it');
+assert.ok(pushedState[9] > 0);
+reset([acceleratingWall, pushed], 0);
+assert.equal(trajectory('500000*t^2', '0', 'pi/2'), 0);
+ticks(1);
+const fastPushedState = sample(engine._engine_time(), 2);
+assert.ok(fastPushedState[6] >= fastPushedState[0] + .00498, 'CCD handles the previously rejected fast trajectory');
+reset([acceleratingWall, pushed], 0);
+assert.equal(trajectory('500000000*t^2', '0', 'pi/2'), 0);
+assert.equal(engine._engine_tick(-1, 0, 0), 3, 'excessive trajectory curvature is rejected before integration');
+assert.equal(engine._engine_time(), 0);
+console.log('PASS WASM accelerated collision: stretched springs, thin surface and accelerating trajectory');
+
+for (const restitution of [0, 1]) {
+  const fastBody = [...base], thinWall = [...base];
+  fastBody[0] = 1;
+  fastBody[1] = -.5;
+  fastBody[3] = fastBody[4] = .002;
+  fastBody[8] = restitution;
+  fastBody[9] = 100000;
+  thinWall[0] = 9;
+  thinWall[3] = 2;
+  thinWall[4] = .001;
+  thinWall[5] = Math.PI / 2;
+  thinWall[8] = 1;
+  thinWall[12] = 1;
+  reset([fastBody, thinWall], 0);
+  ticks(1);
+  const state = sample();
+  const expectedX = restitution === 0 ? -.001 : .498 - 100000 / 240;
+  assert.ok(Math.abs(state[0] - expectedX) < 1e-5, 'CCD consumes the remaining time after impact');
+  assert.ok(Math.abs(state[3] + restitution * 100000) < 1e-5, 'CCD restitution at high speed');
+  const impulses = forceSamples().filter(f => f[1] === 1);
+  assert.ok(Math.abs(impulses.reduce((sum, f) => sum + f[4], 0)) < 1e-5, 'CCD impact action and reaction');
+}
+console.log('PASS WASM continuous CCD: 100000 m/s, thin wall, restitution, remaining time and impulse balance');
+
+{
+  const circle = [...base], wall = [...base];
+  circle[0] = 1;
+  circle[1] = -.005;
+  circle[3] = circle[4] = .02;
+  wall[0] = 9;
+  wall[3] = 2;
+  wall[4] = .001;
+  wall[5] = Math.PI / 2;
+  wall[12] = 1;
+  reset([circle, wall], 0);
+  ticks(1);
+  let state = sample();
+  assert.ok(state[0] <= -.01 + 2e-5, 'initial overlap is removed before movement');
+  assert.equal(state[3], 0, 'overlap recovery adds no velocity');
+  circle[1] = -.5;
+  reset([circle, wall], 0, [[2, 0, -1, 1, 0, 0, 0, 0, 0, 0, 0, 0, -1]]);
+  for (let tick = 0; tick < 60; ++tick) {
+    ticks(1);
+    state = sample();
+    assert.ok(state[0] <= -.01 + 2e-5, 'hinge correction cannot cross a thin wall');
+  }
+  circle[1] = 0;
+  const otherWall = [...wall];
+  wall[1] = -.005;
+  otherWall[1] = .005;
+  reset([circle, wall, otherWall], 0);
+  assert.equal(engine._engine_tick(-1, 0, 0), 3, 'impossible overlap fails without tunnelling');
+  assert.equal(engine._engine_time(), 0);
+}
+console.log('PASS WASM overlap recovery, swept hinge corrections and impossible enclosure');

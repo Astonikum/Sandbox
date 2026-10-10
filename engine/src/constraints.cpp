@@ -2,8 +2,8 @@
 
 namespace {
 void solveHinge(Body &bodyA, Body *bodyB, const Link &link, int source) {
-  Vec2 offsetA = rotated(link.localAnchorA, bodyA.angle),
-       offsetB = bodyB ? rotated(link.localAnchorB, bodyB->angle) : Vec2{},
+  Vec2 offsetA = bodyA.rotate(link.localAnchorA),
+       offsetB = bodyB ? bodyB->rotate(link.localAnchorB) : Vec2{},
        separation = (bodyB ? bodyB->position + offsetB : link.anchor) - (bodyA.position + offsetA);
   double inverseMassA = bodyA.inverseMass(), inverseMassB = bodyB ? bodyB->inverseMass() : 0,
          inverseInertiaA = bodyA.inverseInertia(),
@@ -32,27 +32,79 @@ void solveHinge(Body &bodyA, Body *bodyB, const Link &link, int source) {
     if (bodyB)
       applyImpulse(*bodyB, impulse * (-1), offsetB, ForceCategory::Joint, source);
   }
-  if (link.kind == LinkKind::Weld && inverseInertiaA + inverseInertiaB > 0) {
-    double error = (bodyB ? bodyB->angle : 0) - bodyA.angle - link.referenceAngle,
-           correction = error * .8 / (inverseInertiaA + inverseInertiaB),
-           impulse = ((bodyB ? bodyB->angularVelocity : 0) - bodyA.angularVelocity) /
-                     (inverseInertiaA + inverseInertiaB);
-    bodyA.angle += correction * inverseInertiaA;
-    bodyA.angularVelocity += impulse * inverseInertiaA;
-    bodyA.torqueImpulse += impulse;
-    if (bodyB) {
-      bodyB->angle -= correction * inverseInertiaB;
-      bodyB->angularVelocity -= impulse * inverseInertiaB;
-      bodyB->torqueImpulse -= impulse;
+
+}
+void solveWeld(Body &a, Body *b, const Link &link, int source) {
+  const double ma = a.inverseMass(), mb = b ? b->inverseMass() : 0,
+               ia = a.inverseInertia(), ib = b ? b->inverseInertia() : 0, inertia = ia + ib;
+  if (inertia <= 0) { solveHinge(a, b, link, source); return; }
+  for (bool position : {true, false}) {
+    const Vec2 ra = a.rotate(link.localAnchorA), rb = b ? b->rotate(link.localAnchorB) : Vec2{},
+               coupling = perpendicular(ra) * ia + perpendicular(rb) * ib;
+    const double xx = ma + mb + ra.y * ra.y * ia + rb.y * rb.y * ib - coupling.x * coupling.x / inertia,
+                 yy = ma + mb + ra.x * ra.x * ia + rb.x * rb.x * ib - coupling.y * coupling.y / inertia,
+                 xy = -ra.x * ra.y * ia - rb.x * rb.y * ib - coupling.x * coupling.y / inertia,
+                 determinant = xx * yy - xy * xy;
+    if (determinant <= 1e-20) return;
+    const double angular = position ? ((b ? b->angle : 0) - a.angle - link.referenceAngle) * .8
+                                    : (b ? b->angularVelocity : 0) - a.angularVelocity;
+    const Vec2 linear = position ? ((b ? b->position + rb : link.anchor) - a.position - ra) * .8
+                                : (b ? pointVelocity(*b, rb) : Vec2{}) - pointVelocity(a, ra),
+               rhs = linear - coupling * (angular / inertia),
+               impulse{(yy * rhs.x - xy * rhs.y) / determinant, (xx * rhs.y - xy * rhs.x) / determinant};
+    const double torque = (angular - dot(coupling, impulse)) / inertia;
+    if (position) {
+      a.position = a.position + impulse * ma;
+      a.angle += (cross(ra, impulse) + torque) * ia;
+      if (b) {
+        b->position = b->position - impulse * mb;
+        b->angle -= (cross(rb, impulse) + torque) * ib;
+      }
+    } else {
+      applyImpulse(a, impulse, ra, ForceCategory::Joint, source);
+      a.angularVelocity += torque * ia;
+      a.torqueImpulse += torque;
+      if (b) {
+        applyImpulse(*b, impulse * (-1), rb, ForceCategory::Joint, source);
+        b->angularVelocity -= torque * ib;
+        b->torqueImpulse -= torque;
+      }
     }
   }
+}
+void solveSpringGuide(Body &a, Body *b, const Link &link, int source) {
+  const Vec2 ra = a.rotate(link.localAnchorA),
+             rb = b ? b->rotate(link.localAnchorB) : Vec2{},
+             separation = (b ? b->position + rb : link.anchor) - a.position - ra;
+  const bool rotating = link.pulley >= 0;
+  const double angle = link.referenceAngle + (rotating ? a.angle : 0);
+  const Vec2 axis{std::cos(angle), std::sin(angle)}, normal = perpendicular(axis);
+  const double lever = rotating ? dot(separation, axis) : 0,
+               ja = -cross(ra, normal) - lever, jb = cross(rb, normal),
+               mass = a.inverseMass() + (b ? b->inverseMass() : 0) +
+                      ja * ja * a.inverseInertia() + (b ? jb * jb * b->inverseInertia() : 0);
+  if (mass <= 1e-20) return;
+  const double correction = -dot(separation, normal) * .8 / mass;
+  a.position = a.position - normal * (correction * a.inverseMass());
+  a.angle += ja * correction * a.inverseInertia();
+  if (b) {
+    b->position = b->position + normal * (correction * b->inverseMass());
+    b->angle += jb * correction * b->inverseInertia();
+  }
+  const double speed = dot((b ? b->velocity : Vec2{}) - a.velocity, normal) +
+                       ja * a.angularVelocity + (b ? jb * b->angularVelocity : 0),
+               impulse = -speed / mass;
+  applyImpulse(a, normal * (-impulse), ra, ForceCategory::Spring, source);
+  a.angularVelocity -= lever * impulse * a.inverseInertia();
+  a.torqueImpulse -= lever * impulse;
+  if (b) applyImpulse(*b, normal * impulse, rb, ForceCategory::Spring, source);
 }
 void solveWrappedPulley(std::vector<Body> &bodies, Body &bodyA, Body *bodyB, const Link &link,
                         int source) {
   auto &pulley = bodies[link.pulley];
   double radius = pulley.width / 2;
-  Vec2 offsetA = rotated(link.localAnchorA, bodyA.angle),
-       offsetB = rotated(link.localAnchorB, bodyB->angle),
+  Vec2 offsetA = bodyA.rotate(link.localAnchorA),
+       offsetB = bodyB->rotate(link.localAnchorB),
        strandA = bodyA.position + offsetA - pulley.position,
        strandB = bodyB->position + offsetB - pulley.position;
   double distanceA = length(strandA), distanceB = length(strandB);
@@ -142,8 +194,8 @@ void solveIdealPulley(Body &bodyA, Body *bodyB, const Link &link, int source) {
   applyImpulse(*bodyB, directionB * (-impulse), {}, ForceCategory::Rope, source);
 }
 void solveRope(Body &bodyA, Body *bodyB, const Link &link, int source) {
-  Vec2 offsetA = rotated(link.localAnchorA, bodyA.angle),
-       offsetB = bodyB ? rotated(link.localAnchorB, bodyB->angle) : Vec2{},
+  Vec2 offsetA = bodyA.rotate(link.localAnchorA),
+       offsetB = bodyB ? bodyB->rotate(link.localAnchorB) : Vec2{},
        pointA = bodyA.position + offsetA, pointB = bodyB ? bodyB->position + offsetB : link.anchor,
        separation = pointB - pointA;
   double distance = length(separation);
@@ -184,8 +236,12 @@ void solveConstraint(std::vector<Body> &bodies, const Link &link, int source) {
     return;
   Body &bodyA = bodies[link.bodyA];
   Body *bodyB = link.bodyB >= 0 ? &bodies[link.bodyB] : nullptr;
-  if (link.kind == LinkKind::Hinge || link.kind == LinkKind::Weld)
+  if (link.kind == LinkKind::Hinge)
     solveHinge(bodyA, bodyB, link, source);
+  else if (link.kind == LinkKind::Weld)
+    solveWeld(bodyA, bodyB, link, source);
+  else if (link.kind == LinkKind::SpringGuide)
+    solveSpringGuide(bodyA, bodyB, link, source);
   else if (link.kind == LinkKind::Pulley && bodyB && link.pulley >= 0)
     solveWrappedPulley(bodies, bodyA, bodyB, link, source);
   else if (link.kind == LinkKind::Pulley && bodyB)

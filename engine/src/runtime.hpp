@@ -4,10 +4,6 @@
 #include "solver.hpp"
 
 class Runtime {
-  struct Swept {
-    int i;
-    double x0, x1, y0, y1, speed;
-  };
   std::array<double,
              protocol::MaxBodies * protocol::BodyStride + protocol::MaxLinks * protocol::LinkStride>
       input{};
@@ -22,7 +18,7 @@ class Runtime {
   std::array<double, protocol::MaxBodies> beforeAngularVelocity{};
   std::array<std::array<Expression, 3>, protocol::MaxBodies> paths;
   std::array<bool, protocol::MaxBodies> driven{};
-  std::vector<Swept> sweptBounds;
+  std::vector<RestState> trajectoryStart;
   Solver solver;
   StateHistory history;
   double gravity = 9.81;

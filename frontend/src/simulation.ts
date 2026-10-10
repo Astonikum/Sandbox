@@ -1,9 +1,11 @@
 import type { BodyItem, Patch, Scene, Vec } from "./model";
 import { body } from "./model";
 import { convertUnit, fields, readField } from './variables';
+import { STEP } from './wasm-api';
 export type Metrics = {
   time: number;
   fps: number;
+  rps: number;
   cost: number;
   dropped: number;
   settled: boolean;
@@ -20,6 +22,7 @@ export class Simulation {
   private pending = 0;
   private edits: { id: string; patch: Patch }[] = [];
   private config: Scene;
+  private variablesDirty = false;
   private state: Float64Array | undefined;
   private rendered: Float64Array | undefined;
   private forceSamples: BodyItem["forceSamples"][] = [];
@@ -29,6 +32,7 @@ export class Simulation {
   private metrics: Metrics = {
     time: 0,
     fps: 0,
+    rps: 0,
     cost: 0,
     dropped: 0,
     settled: false,
@@ -36,6 +40,7 @@ export class Simulation {
   };
   private frames = 0;
   private measure = 0;
+  private rateTime = 0;
   private timer: ReturnType<typeof setTimeout> | undefined;
   private getDrag: () => { id: string; x: number; y: number; local: Vec } | null;
   private onFrame: (scene: Scene, display: Scene, metrics: Metrics) => void;
@@ -126,6 +131,12 @@ export class Simulation {
       if (variable && !field.computed) variable.value = convertUnit(readField(item, field.key), field.unit, variable.unit);
     }
   }
+  configureVariables(variables: Scene['variables']) {
+    this.config.variables = structuredClone(variables);
+    this.variableValues = undefined;
+    this.variablesDirty = true;
+    this.metrics.settled = false;
+  }
   private sceneAt(values: Float64Array) {
     let i = 0;
     const items = this.config.items.map((o) => {
@@ -180,22 +191,25 @@ export class Simulation {
     if (!this.measure) this.measure = now;
     this.frames++;
     if (now - this.measure >= 500) {
-      this.metrics.fps = Math.round(
-        (this.frames * 1000) / (now - this.measure),
-      );
+      const elapsed = now - this.measure;
+      this.metrics.fps = Math.round((this.frames * 1000) / elapsed);
+      this.metrics.rps = Math.round(Math.max(0, this.metrics.time - this.rateTime) * 1000 / elapsed / STEP);
+      this.rateTime = this.metrics.time;
       this.frames = 0;
       this.measure = now;
     }
-    if (!this.waiting && !this.metrics.settled) {
+    if (!this.waiting && (!this.metrics.settled || this.edits.length || this.variablesDirty)) {
       this.waiting = true;
       this.worker.postMessage({
         type: "frame",
         elapsed: this.pending,
         drag: this.getDrag(),
         edits: this.edits,
+        variables: this.variablesDirty ? this.config.variables : undefined,
       });
       this.pending = 0;
       this.edits = [];
+      this.variablesDirty = false;
     }
     if (this.state && this.rendered)
       this.onFrame(

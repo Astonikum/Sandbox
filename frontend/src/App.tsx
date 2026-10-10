@@ -29,6 +29,7 @@ import { ArrowCounterClockwiseIcon } from "@phosphor-icons/react/dist/csr/ArrowC
 import { ArrowClockwiseIcon } from "@phosphor-icons/react/dist/csr/ArrowClockwise";
 import { GridFourIcon } from "@phosphor-icons/react/dist/csr/GridFour";
 import { CornersOutIcon } from "@phosphor-icons/react/dist/csr/CornersOut";
+import { PaletteIcon } from "@phosphor-icons/react/dist/csr/Palette";
 import { ArrowDownIcon } from "@phosphor-icons/react/dist/csr/ArrowDown";
 import { CursorIcon } from "@phosphor-icons/react/dist/csr/Cursor";
 import { SlidersHorizontalIcon } from "@phosphor-icons/react/dist/csr/SlidersHorizontal";
@@ -83,10 +84,11 @@ import type { Metrics } from "./simulation";
 import { paint, fit, fromScreen, hit, handles, resized, rotationHandle, rotated } from "./render";
 import type { Camera } from "./render";
 import { ComponentIcon } from "./ComponentIcon";
-import { allowedUnits, bindableVariables, bindVariable, bindingKey, convertUnit, derivedFields, displayUnit, displayValue, ensureVariables, fields, knownUnit, readField, removeVariable, saveVariable, setVariable, syncVariables, unitChoices, variableMode } from './variables';
+import { allowedUnits, bindableVariables, bindVariable, bindingKey, convertUnit, derivedFields, displayUnit, displayValue, ensureVariables, fields, knownUnit, readField, removeVariable, restoreSimulation, saveVariable, setVariable, syncVariables, unitChoices, variableMode } from './variables';
 import type { Variable } from './variables';
 import { GraphEditor, VariableGraph } from './GraphEditor';
 import { Button as AppButton, SelectControl } from './ui';
+import { STEP } from './wasm-api';
 import "./App.css";
 
 type ToolKind = Kind | "select";
@@ -284,18 +286,20 @@ export default function App() {
   const [scene, setScene] = useState<Scene>(() => ensureVariables(structuredClone(initial))),
     [selected, setSelected] = useState<string | null>("2"),
     [grid, setGrid] = useState(true),
-    [showAuto, setShowAuto] = useState(false),
+    [showAuto, setShowAuto] = useState(true),
+    [coloredVectors, setColoredVectors] = useState(true),
     [preview, setPreview] = useState<{ source: Scene; scene: Scene } | null>(null),
     [pending, setPending] = useState<Pending | null>(null),
     [running, setRunning] = useState(false),
     [busy, setBusy] = useState(false),
+    [simulationPerformance, setSimulationPerformance] = useState<{ fps: number; rps: number } | null>(null),
     [notice, setNotice] = useState<{ text: string; error: boolean } | null>(
       null,
     ),
     [counts, setCounts] = useState([0, 0]),
     [activeTool, setActiveTool] = useState<ToolKind>("select"),
     [saveDialog, setSaveDialog] = useState(false),
-    [panelWidthPrefs, setPanelWidthPrefs] = useState(() => window.innerWidth <= 1100 ? { left: 190, right: 230 } : { left: 250, right: 240 }),
+    [panelWidthPrefs, setPanelWidthPrefs] = useState(() => window.innerWidth <= 1100 ? { left: 219, right: 265 } : { left: 288, right: 276 }),
     [layoutWidth, setLayoutWidth] = useState(() => window.innerWidth),
     [layoutHeight, setLayoutHeight] = useState(() => window.innerHeight),
     [responsivePanel, setResponsivePanel] = useState<"variables" | "inspector" | null>(null),
@@ -316,7 +320,7 @@ export default function App() {
   const inspectorAsDrawer = layoutWidth <= 800 || layoutWidth / Math.max(1, layoutHeight) <= 4 / 3;
   const camera = useRef<Camera>({ x: 0, y: 0.7, scale: 90 }),
     cameraTarget = useRef<Camera>({ x: 0, y: 0.7, scale: 90 }),
-    state = useRef({ selected, grid, pending, running, showAuto }),
+    state = useRef({ selected, grid, pending, running, showAuto, coloredVectors }),
     hover = useRef<string | null>(null),
     space = useRef(false),
     drag = useRef<{ id: string; x: number; y: number; local: Vec } | null>(null);
@@ -391,6 +395,7 @@ export default function App() {
           for (const field of fields(o)) if (readField(o, field.key) !== readField(prior, field.key)) {
             if (field.key.startsWith('vector.')) changed.vector = (o as Effect).vector;
             else if (field.key.startsWith('velocity.')) continue;
+            else if (field.key === 'radius' && geo(o)) { changed.w = o.w; changed.h = o.h; }
             else changed[field.key] = readField(o, field.key);
           }
           if (body(o) && body(prior) && JSON.stringify(o.trajectory) !== JSON.stringify(prior.trajectory)) changed.trajectory = o.trajectory;
@@ -438,8 +443,8 @@ export default function App() {
     return () => { observer.disconnect(); window.removeEventListener("resize", updateHeight); };
   }, []);
   useEffect(() => {
-    state.current = { selected, grid, pending, running, showAuto };
-  }, [selected, grid, pending, running, showAuto]);
+    state.current = { selected, grid, pending, running, showAuto, coloredVectors };
+  }, [selected, grid, pending, running, showAuto, coloredVectors]);
   useEffect(() => {
     if (running) return;
     display.current = scene;
@@ -509,6 +514,7 @@ export default function App() {
         ids,
         hover.current,
         st.showAuto,
+        st.coloredVectors,
       );
       raf = requestAnimationFrame(frame);
     };
@@ -787,9 +793,10 @@ export default function App() {
   const stop = () => {
     simulation.current?.stop();
     simulation.current = null;
-    if (snapshot.current) update(snapshot.current);
+    if (snapshot.current) update(restoreSimulation(snapshot.current, current.current));
     snapshot.current = null;
     setRunning(false);
+    setSimulationPerformance(null);
     setBusy(false);
     drag.current = null;
     metrics.current = null;
@@ -817,8 +824,10 @@ export default function App() {
     snapshot.current = structuredClone(current.current);
     setRunning(true);
     setBusy(true);
+    setSimulationPerformance({ fps: 0, rps: 0 });
     setNotice(null);
     let lastPanel = 0,
+      lastPerformance = 0,
       converged = false,
       overloaded = false;
     const fail = (message: string) => {
@@ -834,6 +843,10 @@ export default function App() {
         current.current = s;
         display.current = d;
         metrics.current = m;
+        if (performance.now() - lastPerformance >= 500) {
+          setSimulationPerformance({ fps: m.fps, rps: m.rps });
+          lastPerformance = performance.now();
+        }
         if (m.time - lastPanel >= 0.1 || m.settled) {
           setScene(s);
           lastPanel = m.time;
@@ -862,7 +875,7 @@ export default function App() {
   };
   const save = (name: string) => {
     const s = validate(
-        running && snapshot.current ? snapshot.current : current.current,
+        running && snapshot.current ? restoreSimulation(snapshot.current, current.current) : current.current,
       ),
       url = URL.createObjectURL(
       new Blob([serializeProject(s)], { type: "application/json" }),
@@ -894,10 +907,22 @@ export default function App() {
     }
   };
   const registryChange = (value: Scene | (() => Scene)) => {
-    if (running || simulation.current) return false;
     try {
       const next = typeof value === 'function' ? value() : value;
       validate(next);
+      if (simulation.current) {
+        if (JSON.stringify(next.bindings) !== JSON.stringify(current.current.bindings) ||
+            next.variables?.length !== current.current.variables?.length ||
+            next.variables?.some((v, i) => v.id !== current.current.variables?.[i].id)) return false;
+        for (const item of next.items) {
+          const previous = current.current.items.find(o => o.id === item.id)!;
+          const patch: Patch = {};
+          for (const [key, value] of Object.entries(item))
+            if (JSON.stringify(value) !== JSON.stringify(previous[key as keyof Item])) patch[key] = value;
+          if (Object.keys(patch).length) simulation.current.edit(item.id, patch);
+        }
+        simulation.current.configureVariables(next.variables);
+      }
       commit(next);
       return true;
     } catch (e) { tell(e instanceof Error ? e.message : String(e), true); return false; }
@@ -950,14 +975,14 @@ export default function App() {
           onChange={next => registryChange(() => bindVariable(current.current, chosen!.id, key, next))}
           options={(computed ? [variable] : compatible).map(v => ({ value: v.id, label: <Symbol value={v.symbol} />, text: v.symbol }))} />
       </span>
-      <AppButton className="visibility-button" title={variable.visible ? 'Скрыть в списке переменных' : 'Показать в списке переменных'} aria-label={`${variable.visible ? 'Скрыть' : 'Показать'} ${variable.symbol}`} aria-pressed={variable.visible} disabled={running} onClick={() => updateVariable(id!, { visible: !variable.visible, visibilityLocked: true })}>{variable.visible ? <EyeIcon /> : <EyeSlashIcon />}</AppButton>
-      <InlineNumber label={label} value={key.endsWith('.angle') && readField(shown, key.replace('.angle', '.magnitude')) === 0 ? displayValue(variable) : convertUnit(readField(shown, key), unit, displayUnit(variable))} disabled={disabled || computed || variableMode(variable) !== 'number' || (running && (key.startsWith('vector.') || key.startsWith('velocity.') || key === 'vx' || key === 'vy'))} onChange={n => {
+      <AppButton className="visibility-button" title={variable.visible ? 'Скрыть в списке переменных' : 'Показать в списке переменных'} aria-label={`${variable.visible ? 'Скрыть' : 'Показать'} ${variable.symbol}`} aria-pressed={variable.visible} onClick={() => updateVariable(id!, { visible: !variable.visible, visibilityLocked: true })}>{variable.visible ? <EyeIcon /> : <EyeSlashIcon />}</AppButton>
+      <InlineNumber label={label} value={key.endsWith('.angle') && readField(shown, key.replace('.angle', '.magnitude')) === 0 ? displayValue(variable) : convertUnit(readField(shown, key), unit, displayUnit(variable))} disabled={disabled || computed || variableMode(variable) !== 'number'} onChange={n => {
         const physical = convertUnit(n, displayUnit(variable), unit);
         if (physical < min || physical > max) { tell(`${label}: число от ${min} до ${max} ${unit}`, true); return false; }
         if (key.startsWith('vector.') || key.startsWith('velocity.') || key === 'vx' || key === 'vy') return registryChange(() => setVariable(current.current, id!, convertUnit(n, displayUnit(variable), variable.unit)));
         return change(chosen!.id, key === 'radius' ? { w: physical * 2, h: physical * 2 } : { [key]: physical });
       }} />
-      <UnitSelect variable={variable} disabled={running} onChange={unit => updateVariable(id!, { displayUnit: unit })} />
+      <UnitSelect variable={variable} onChange={unit => updateVariable(id!, { displayUnit: unit })} />
     </div>;
   };
   return (
@@ -1021,7 +1046,13 @@ export default function App() {
         <Tool label="Показывать векторы" tooltip="Автоматически показывать силы, скорости и ускорения." active={showAuto} onClick={() => setShowAuto(!showAuto)}>
           <ArrowDownIcon />
         </Tool>
+        <Tool label="Цветные векторы" tooltip="Различать векторы тел по цвету и слегка утолщать стрелки." active={coloredVectors} onClick={() => setColoredVectors(!coloredVectors)}>
+          <PaletteIcon />
+        </Tool>
         <span className="spacer" />
+        {running && !busy && simulationPerformance && <span className="simulation-performance" aria-label={`${simulationPerformance.fps} кадров в секунду, ${simulationPerformance.rps} из ${Math.round(1 / STEP)} физических шагов в секунду`} title="Кадры в секунду · реальные/целевые физические шаги в секунду">
+          {simulationPerformance.fps} FPS · {simulationPerformance.rps}/{Math.round(1 / STEP)} RPS
+        </span>}
         <Tool
           label={
             running ? "Остановить и восстановить сцену" : "Запустить симуляцию"
@@ -1049,21 +1080,21 @@ export default function App() {
               {scene.variables?.filter(v => v.visible).map(v => <div className="variable-card" key={v.id}>
                 <div className="variable-card-line">
                   <Symbol value={v.symbol} />
-                  <InlineNumber label={`Переменная ${v.symbol}`} value={displayValue(v, observedScene.variables?.find(x => x.id === v.id)?.value ?? v.value)} disabled={running || !!v.derived || variableMode(v) !== 'number'} onChange={n => registryChange(() => setVariable(current.current, v.id, convertUnit(n, displayUnit(v), v.unit)))} />
-                  <UnitSelect variable={v} disabled={running} onChange={unit => updateVariable(v.id, { displayUnit: unit })} />
+                  <InlineNumber label={`Переменная ${v.symbol}`} value={displayValue(v, observedScene.variables?.find(x => x.id === v.id)?.value ?? v.value)} disabled={!!v.derived || variableMode(v) !== 'number'} onChange={n => registryChange(() => setVariable(current.current, v.id, convertUnit(n, displayUnit(v), v.unit)))} />
+                  <UnitSelect variable={v} onChange={unit => updateVariable(v.id, { displayUnit: unit })} />
                 </div>
                 <div className="variable-actions">
-                  <AppButton className="variable-tab" disabled={running || !!v.derived} title="Числовой режим" aria-label={`Числовой режим ${v.symbol}`} aria-pressed={variableMode(v) === 'number'} onClick={() => setVariableMode(v, 'number')}><NumberSquareOneIcon weight="fill" /></AppButton>
-                  <AppButton className="variable-tab" disabled={running || !!v.derived} title="Диапазон" aria-label={`Диапазон ${v.symbol}`} aria-pressed={variableMode(v) === 'range'} onClick={() => setVariableMode(v, 'range')}><SlidersHorizontalIcon weight="fill" /></AppButton>
-                  <AppButton className="variable-tab" disabled={running || !!v.derived} title="График зависимости" aria-label={`График зависимости ${v.symbol}`} aria-pressed={variableMode(v) === 'graph'} onClick={() => setVariableMode(v, 'graph')}><ChartLineIcon weight="fill" /></AppButton>
+                  <AppButton className="variable-tab" disabled={!!v.derived} title="Числовой режим" aria-label={`Числовой режим ${v.symbol}`} aria-pressed={variableMode(v) === 'number'} onClick={() => setVariableMode(v, 'number')}><NumberSquareOneIcon weight="fill" /></AppButton>
+                  <AppButton className="variable-tab" disabled={!!v.derived} title="Диапазон" aria-label={`Диапазон ${v.symbol}`} aria-pressed={variableMode(v) === 'range'} onClick={() => setVariableMode(v, 'range')}><SlidersHorizontalIcon weight="fill" /></AppButton>
+                  <AppButton className="variable-tab" disabled={!!v.derived} title="График зависимости" aria-label={`График зависимости ${v.symbol}`} aria-pressed={variableMode(v) === 'graph'} onClick={() => setVariableMode(v, 'graph')}><ChartLineIcon weight="fill" /></AppButton>
                   <span className="variable-actions-spacer" />
                   <AppButton disabled={running} title="Дублировать" aria-label={`Дублировать ${v.symbol}`} onClick={() => duplicateVariable(v)}><CopySimpleIcon weight="fill" /></AppButton>
                   <AppButton disabled={running} title="Удалить" aria-label={`Удалить ${v.symbol}`} onClick={() => { if (editingRange === v.id) setEditingRange(null); if (editGraph === v.id) setEditGraph(null); registryChange(removeVariable(current.current, v.id)); }}><TrashIcon weight="fill" /></AppButton>
                 </div>
                 {variableMode(v) === 'range' && <div className="variable-tool-content" aria-label={`Диапазон ${v.symbol}`}>
                   {editingRange === v.id || !v.range ? <RangeEditor key={`${v.id}-range`} variable={v} onClose={() => setEditingRange(null)} onSave={range => { if (updateVariable(v.id, { range })) setEditingRange(null); }} onRemove={() => { updateVariable(v.id, { range: undefined, mode: 'number' }); setEditingRange(null); }} /> : <>
-                    <Slider className="variable-range" aria-label={`Диапазон ${v.symbol}`} minValue={v.range.min} maxValue={v.range.max} step={v.range.step} value={Math.max(v.range.min, Math.min(v.range.max, observedScene.variables?.find(x => x.id === v.id)?.value ?? v.value))} isDisabled={running} onChange={next => registryChange(() => setVariable(current.current, v.id, Array.isArray(next) ? next[0] : next))}><SliderTrack><SliderThumb /></SliderTrack></Slider>
-                    <div className="variable-range-meta"><span>{displayValue(v, v.range.min)} – {displayValue(v, v.range.max)} {displayUnit(v)}</span><AppButton disabled={running || !!v.derived} className="range-inline-config" onClick={() => setEditingRange(v.id)}>Границы</AppButton></div>
+                    <Slider className="variable-range" aria-label={`Диапазон ${v.symbol}`} minValue={v.range.min} maxValue={v.range.max} step={v.range.step} value={Math.max(v.range.min, Math.min(v.range.max, observedScene.variables?.find(x => x.id === v.id)?.value ?? v.value))} isDisabled={!!v.derived} onChange={next => registryChange(() => setVariable(current.current, v.id, Array.isArray(next) ? next[0] : next))}><SliderTrack><SliderThumb /></SliderTrack></Slider>
+                    <div className="variable-range-meta"><span>{displayValue(v, v.range.min)} – {displayValue(v, v.range.max)} {displayUnit(v)}</span><AppButton disabled={!!v.derived} className="range-inline-config" onClick={() => setEditingRange(v.id)}>Границы</AppButton></div>
                   </>}
                 </div>}
                 {variableMode(v) === 'graph' && <div className="variable-graph-preview"><VariableGraph key={v.id} variable={v} variables={scene.variables || []} onRequestEdit={() => setEditGraph(v.id)} /></div>}
@@ -1211,20 +1242,20 @@ export default function App() {
                   ) : (
                     <>
                       <div className="pair">
-                        {field("x", "x", "м", -1e5, 1e5, running)}
-                        {field("y", "y", "м", -1e5, 1e5, running)}
+                        {field("x", "x", "м", -1e5, 1e5)}
+                        {field("y", "y", "м", -1e5, 1e5)}
                       </div>
                       {["circle", "pulley", "bearing"].includes(chosen.kind) ? (
-                        field("radius", "Радиус", "м", 0.0005, 1e5, running)
+                        field("radius", "Радиус", "м", 0.0005, 1e5)
                       ) : chosen.kind === "surface" ? (
-                        field("w", "Длина", "м", 0.001, 1e5, running)
+                        field("w", "Длина", "м", 0.001, 1e5)
                       ) : !["spring", "rope"].includes(chosen.kind) && (
                         <div className="pair">
-                          {field("w", chosen.kind === "rod" ? "Длина" : "Ширина", "м", 0.001, 1e5, running)}
-                          {field("h", chosen.kind === "rod" ? "Толщина" : "Высота", "м", 0.001, 1e5, running)}
+                          {field("w", chosen.kind === "rod" ? "Длина" : "Ширина", "м", 0.001, 1e5)}
+                          {field("h", chosen.kind === "rod" ? "Толщина" : "Высота", "м", 0.001, 1e5)}
                         </div>
                       )}
-                      {!["bearing", "spring", "rope"].includes(chosen.kind) && field("angle", "Угол φ", "рад", -1e5, 1e5, running)}
+                      {!["bearing", "spring", "rope"].includes(chosen.kind) && field("angle", "Угол φ", "рад", -1e5, 1e5)}
                       {chosen.kind === "surface" && <div className="pair">
                         {field("mu", "Трение μ", "", 0)}
                         {field("restitution", "Восстановление e", "", 0, 1)}
@@ -1371,7 +1402,7 @@ export default function App() {
         try { return registryChange(saveVariable(current.current, { ...draft, ...(editVariable === 'new' ? {} : { id: editVariable }) })) ? null : 'Не удалось сохранить переменную'; }
         catch (error) { return error instanceof Error ? error.message : String(error); }
       }} />}
-      {!running && editGraph && scene.variables?.find(v => v.id === editGraph) && <GraphEditor key={editGraph} variable={scene.variables.find(v => v.id === editGraph)!} variables={scene.variables || []} onClose={() => setEditGraph(null)} onSave={graph => { updateVariable(editGraph, { graph }); }} />}
+      {editGraph && scene.variables?.find(v => v.id === editGraph) && <GraphEditor key={editGraph} variable={scene.variables.find(v => v.id === editGraph)!} variables={scene.variables || []} onClose={() => setEditGraph(null)} onSave={graph => { updateVariable(editGraph, { graph }); }} />}
     </div>
   );
 }

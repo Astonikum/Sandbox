@@ -21,40 +21,21 @@ void Runtime::beginTick() {
 }
 double Runtime::maximumStepDuration() {
   double maximumDt = TickDuration / 8;
-
-  std::vector<Swept> &swept = sweptBounds;
-  swept.resize(bodies.size());
-  for (size_t i = 0; i < bodies.size(); ++i) {
-    const auto &body = bodies[i];
-    double acceleration = length(forces[i] * body.inverseMass() + Vec2{0, gravity}),
-           speed = length(body.velocity) +
-                   std::abs(body.angularVelocity) * std::hypot(body.width, body.height) / 2 +
-                   acceleration * TickDuration,
-           reach = speed * TickDuration, ex = projectedRadius(body, {1, 0}) + reach,
-           ey = projectedRadius(body, {0, 1}) + reach;
-    Vec2 center = contactCenter(body);
-    swept[i] = {(int)i, center.x - ex, center.x + ex, center.y - ey, center.y + ey, speed};
-  }
-  std::sort(swept.begin(), swept.end(),
-            [](const Swept &bodyA, const Swept &body) { return bodyA.x0 < body.x0; });
-  for (size_t i = 0; i < swept.size(); ++i)
-    for (size_t j = i + 1; j < swept.size() && swept[j].x0 <= swept[i].x1; ++j) {
-      const auto &boundsA = swept[i];
-      const auto &boundsB = swept[j];
-      const auto &bodyA = bodies[boundsA.i];
-      const auto &body = bodies[boundsB.i];
-      if (boundsA.y1 < boundsB.y0 || boundsB.y1 < boundsA.y0 ||
-          (bodyA.inverseMass() == 0 && body.inverseMass() == 0))
-        continue;
-      const double sizeA = bodyA.kind == BodyKind::Surface ? std::numeric_limits<double>::infinity()
-                                                           : std::min(bodyA.width, bodyA.height),
-                   sizeB = body.kind == BodyKind::Surface ? std::numeric_limits<double>::infinity()
-                                                          : std::min(body.width, body.height),
-                   collisionSize = std::min(sizeA, sizeB);
-      if (std::isfinite(collisionSize))
-        maximumDt = std::min(maximumDt, .2 * collisionSize /
-                                             std::max(boundsA.speed + boundsB.speed, 1e-9));
-    }
+  double tolerance = .001;
+  for (const auto &body : bodies)
+    if (body.kind != BodyKind::Surface && body.kind != BodyKind::Rod)
+      tolerance = std::min(tolerance, .01 * std::min(body.width, body.height));
+  for (size_t i = 0; i < bodies.size(); ++i)
+    if (driven[i])
+      for (double fraction : {0., .5, 1.}) {
+        const double time = (tickIndex + fraction) * TickDuration;
+        const auto x = paths[i][0].at(time), y = paths[i][1].at(time), angle = paths[i][2].at(time);
+        const double radius = bodies[i].round() ? 0 : std::hypot(bodies[i].width, bodies[i].height) / 2;
+        const double acceleration = std::hypot(x.secondDerivative, y.secondDerivative) +
+                                    std::abs(angle.secondDerivative) * radius;
+        if (acceleration > 0)
+          maximumDt = std::min(maximumDt, std::sqrt(8 * tolerance / acceleration));
+      }
   for (const auto &link : links)
     if (link.kind == LinkKind::Spring) {
       const auto &bodyA = bodies[link.bodyA];
@@ -99,10 +80,22 @@ int Runtime::advance(int draggedBody, double x, double y) {
     }
     int substeps = static_cast<int>(requiredSubsteps);
     double dt = TickDuration / substeps;
+    const bool hasTrajectories = std::any_of(driven.begin(), driven.end(), [](bool value) { return value; });
+    if (hasTrajectories)
+      trajectoryStart.resize(bodies.size());
     for (int substep = 0; substep < substeps; ++substep) {
+      if (hasTrajectories)
+        for (size_t i = 0; i < bodies.size(); ++i) {
+          const auto &body = bodies[i];
+          trajectoryStart[i] = {body.position, body.velocity, body.angle, body.angularVelocity};
+        }
       double time = tickIndex * TickDuration + (substep + 1) * dt;
       applyTrajectories(time);
-      solver.step(bodies, links, forces, gravity, dt, draggedBody, {x, y}, localGrab);
+      if (!solver.step(bodies, links, forces, gravity, dt, draggedBody, {x, y}, localGrab,
+                       hasTrajectories ? &trajectoryStart : nullptr)) {
+        valid = false;
+        return Status::ExcessiveSubsteps;
+      }
     }
     for (const auto &body : bodies)
       for (double value : {body.position.x, body.position.y, body.velocity.x, body.velocity.y,

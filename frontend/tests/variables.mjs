@@ -151,3 +151,16 @@ assert.deepEqual(s.items.filter(o => o.kind === 'rect').map(o => o.mass), [8, 8]
 assert.equal(valueAt([{ x: 0, y: 0 }, { x: 1, y: 1 }], .5), .5);
 assert.equal(valueAt([{ x: 0, y: 0 }, { x: 1, y: 1, break: true }], .5), 0);
 console.log('PASS variables: defaults, custom creation, shared binding, propagation, deletion and graph interpolation');
+
+const { restoreSimulation } = await import(url);
+const saved = structuredClone(starting), live = structuredClone(starting);
+live.items[1].x = 42;
+live.variables[0] = { ...live.variables[0], value: 12, mode: 'graph', graph: { source: 'time', points: [{ x: 0, y: 1 }, { x: 2, y: 4 }] }, range: { min: 0, max: 20, step: .1 } };
+const restored = restoreSimulation(saved, live);
+assert.deepEqual(restored.items, saved.items);
+assert.equal(restored.variables[0].value, saved.variables[0].value);
+assert.equal(restored.variables[0].mode, 'graph');
+assert.deepEqual(restored.variables[0].graph, live.variables[0].graph);
+assert.deepEqual(restored.variables[0].range, live.variables[0].range);
+assert.deepEqual(saved, starting, 'restore does not mutate the initial scene');
+console.log('PASS stop/save restore physical values while retaining graph and range configuration');

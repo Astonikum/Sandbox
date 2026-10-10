@@ -13,9 +13,70 @@ static void resetBody(Runtime &runtime, double velocity) {
   assert(runtime.reset(1, 0, 0) == Status::Ok);
 }
 
+static void checkCollisionMotion(Runtime &runtime) {
+  for (int kind : {BodyKind::Rectangle, BodyKind::Circle})
+    for (double angle : {0., .4, 1.5707963267948966})
+      for (double side : {-1., 1.}) {
+        const Vec2 direction{side * std::cos(angle), side * std::sin(angle)};
+        const double body[BodyStride] = {static_cast<double>(kind), 0, 0, .01, .01, angle, 1,
+                                        0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+        const double wall[BodyStride] = {BodyKind::Surface, .04 * direction.x, .04 * direction.y,
+                                        1, .001, angle + 1.5707963267948966, 0,
+                                        0, 0, 0, 0, 0, 1, 0, 0, 0, 0};
+        const double spring[LinkStride] = {LinkKind::Spring, 0, -1, 5 * direction.x, 5 * direction.y,
+                                          0, 0, 0, 0, 0, 2000, 0, -1, 0, 0, 0};
+        std::copy(std::begin(body), std::end(body), runtime.inputData());
+        std::copy(std::begin(wall), std::end(wall), runtime.inputData() + BodyStride);
+        std::copy(std::begin(spring), std::end(spring), runtime.inputData() + MaxBodies * BodyStride);
+        assert(runtime.reset(2, 1, 0) == Status::Ok);
+        for (int tick = 0; tick < 8; ++tick) {
+          assert(runtime.advance(-1, 0, 0) == Status::Ok);
+          assert(runtime.sample(runtime.time()) == Status::Ok);
+          const Vec2 position{runtime.outputData()[0], runtime.outputData()[1]};
+          assert(dot(position, direction) <= .03502);
+        }
+        assert(runtime.reset(2, 0, 0) == Status::Ok);
+        assert(runtime.editBody(0, BodyField::VelocityX, 50 * direction.x) == Status::Ok);
+        assert(runtime.editBody(0, BodyField::VelocityY, 50 * direction.y) == Status::Ok);
+        assert(runtime.advance(-1, 0, 0) == Status::Ok);
+        assert(runtime.sample(runtime.time()) == Status::Ok);
+        assert(dot({runtime.outputData()[0], runtime.outputData()[1]}, direction) <= .03502);
+        assert(std::abs(dot({runtime.outputData()[3], runtime.outputData()[4]}, direction)) < 1e-8);
+      }
+  const double body[BodyStride] = {BodyKind::Circle, .02, 0, .01, .01, 0, 1,
+                                  0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+  const double wall[BodyStride] = {BodyKind::Surface, 0, 0, 1, .001, 1.5707963267948966, 0,
+                                  0, 0, 0, 0, 0, 2, 0, 0, 0, 0};
+  std::copy(std::begin(body), std::end(body), runtime.inputData());
+  std::copy(std::begin(wall), std::end(wall), runtime.inputData() + BodyStride);
+  assert(runtime.reset(2, 0, 0) == Status::Ok);
+  std::strcpy(runtime.formulaData(), "5000*t^2");
+  std::strcpy(runtime.formulaData() + FormulaSize, "0");
+  std::strcpy(runtime.formulaData() + FormulaSize * 2, "pi/2");
+  assert(runtime.setTrajectory(1, 1) == Status::Ok);
+  assert(runtime.advance(-1, 0, 0) == Status::Ok);
+  assert(runtime.sample(runtime.time()) == Status::Ok);
+  assert(runtime.outputData()[0] >= runtime.outputData()[6] + .00498);
+  assert(runtime.outputData()[3] > 0);
+  assert(runtime.reset(2, 0, 0) == Status::Ok);
+  std::strcpy(runtime.formulaData(), "500000*t^2");
+  assert(runtime.setTrajectory(1, 1) == Status::Ok);
+  assert(runtime.advance(-1, 0, 0) == Status::Ok);
+  assert(runtime.sample(runtime.time()) == Status::Ok);
+  assert(runtime.outputData()[0] >= runtime.outputData()[6] + .00498);
+  assert(runtime.reset(2, 0, 0) == Status::Ok);
+  std::strcpy(runtime.formulaData(), "500000000*t^2");
+  assert(runtime.setTrajectory(1, 1) == Status::Ok);
+  assert(runtime.advance(-1, 0, 0) == Status::ExcessiveSubsteps);
+  assert(runtime.time() == 0);
+  std::cout << "PASS accelerated collision: stretched springs, thin rotated surfaces, both sides, "
+               "kinematic acceleration and bounded rejection\n";
+}
+
 int main() {
   auto first = std::make_unique<Runtime>();
   auto second = std::make_unique<Runtime>();
+  checkCollisionMotion(*first);
   resetBody(*first, 1);
   resetBody(*second, -2);
   assert(first->inputData() != second->inputData());

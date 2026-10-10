@@ -43,6 +43,7 @@
   color: var(--ctp-base);
   margin-left: 5px;
 }
+.simulation-performance { flex-shrink: 0; color: var(--ctp-subtext0); font: 11px Consolas, monospace; white-space: nowrap; }
 .tool.run:hover {
   background: var(--ctp-mauve);
 }
@@ -58,7 +59,7 @@ main {
   position: relative;
   flex: 1;
   display: grid;
-  grid-template-columns: minmax(180px, var(--left-panel-width, 250px)) 6px 52px 6px minmax(320px, 1fr) 6px minmax(200px, var(--right-panel-width, 240px));
+  grid-template-columns: minmax(180px, var(--left-panel-width, 288px)) 6px 52px 6px minmax(320px, 1fr) 6px minmax(200px, var(--right-panel-width, 276px));
   min-height: 0;
 }
 .resize-handle { position: relative; z-index: 1; touch-action: none; cursor: col-resize; user-select: none; }
@@ -296,13 +297,16 @@ h2 {
 .graph-editor-body { display: grid; grid-template-columns: minmax(0, 1fr) 190px; align-items: stretch; gap: 12px; min-height: 0; }
 .graph-key-points { max-height: 320px; min-width: 0; overflow: auto; }
 .graph-key-point-head, .graph-key-point { display: grid; align-items: center; gap: 6px; }
-.graph-key-point-head { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 28px; }
-.graph-key-point { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.graph-key-point-head { grid-template-columns: 22px minmax(0, 1fr) minmax(0, 1fr) 28px; }
+.graph-key-point { grid-template-columns: 22px repeat(2, minmax(0, 1fr)); }
 .graph-key-point-head { position: sticky; top: 0; z-index: 1; height: 28px; padding: 0 4px; color: var(--ctp-subtext0); background: var(--ctp-base); font-size: 12px; }
 .graph-key-point-head button { display: grid; place-items: center; width: 26px; height: 26px; color: var(--ctp-subtext0); }
 .graph-key-point-head button:hover:not([data-disabled]) { color: var(--ctp-blue); background: var(--ui-hover); }
 .graph-key-point-head svg { width: 16px; height: 16px; }
 .graph-key-point { padding: 3px 4px; border-radius: 4px; }
+.graph-point-drag { display: grid; place-items: center; width: 22px; color: var(--ctp-overlay1); cursor: grab; }
+.graph-point-drag:active { cursor: grabbing; }
+.graph-point-drag svg { width: 16px; height: 16px; }
 .graph-key-point.selected { background: var(--ui-hover); }
 .graph-key-point input { width: 100%; min-width: 0; padding: 4px 5px; border: 1px solid var(--ctp-surface0); color: var(--ctp-text); background: var(--ctp-base); font: 13px Consolas, monospace; text-align: right; }
 .graph-key-point input:focus { border-color: var(--ctp-blue); outline: 1px solid color-mix(in srgb, var(--ctp-blue) 30%, transparent); }
@@ -535,14 +539,14 @@ h2 {
   .variable-field small, .variable-field .unit-select, .variable-field .unit-static { grid-column: 4; grid-row: 2; width: auto; }
 }
 @media (max-width: 800px), (max-aspect-ratio: 4 / 3) {
-  main { grid-template-columns: minmax(180px, var(--left-panel-width, 190px)) 6px 52px 6px minmax(0, 1fr); }
+  main { grid-template-columns: minmax(180px, var(--left-panel-width, 219px)) 6px 52px 6px minmax(0, 1fr); }
   .right, .inspector-resize { display: none; }
-  .right.drawer-open { position: absolute; top: 0; right: 0; bottom: 0; z-index: 6; display: grid; width: min(var(--right-drawer-width, 230px), calc(100% - 48px)); box-shadow: -10px 0 24px color-mix(in srgb, var(--ctp-text) 12%, transparent); }
+  .right.drawer-open { position: absolute; top: 0; right: 0; bottom: 0; z-index: 6; display: grid; width: min(var(--right-drawer-width, 265px), calc(100% - 48px)); box-shadow: -10px 0 24px color-mix(in srgb, var(--ctp-text) 12%, transparent); }
   .right.drawer-open .drawer-close { display: grid; }
   .inspector-resize { display: none; }
-  main.inspector-drawer-open .inspector-resize { position: absolute; top: 0; right: min(var(--right-drawer-width, 230px), calc(100% - 48px)); bottom: 0; z-index: 7; display: block; width: 10px; }
+  main.inspector-drawer-open .inspector-resize { position: absolute; top: 0; right: min(var(--right-drawer-width, 265px), calc(100% - 48px)); bottom: 0; z-index: 7; display: block; width: 10px; }
   .inspector-toggle { display: inline-flex; }
-  .panel-scrim { position: absolute; inset: 0 0 0 calc(var(--left-panel-width, 190px) + 64px); z-index: 5; display: block; width: auto; height: auto; border: 0; border-radius: 0; background: color-mix(in srgb, var(--ctp-text) 12%, transparent); }
+  .panel-scrim { position: absolute; inset: 0 0 0 calc(var(--left-panel-width, 219px) + 64px); z-index: 5; display: block; width: auto; height: auto; border: 0; border-radius: 0; background: color-mix(in srgb, var(--ctp-text) 12%, transparent); }
   .object-row {
     gap: 5px;
     font-size: 14px;
@@ -578,10 +582,10 @@ h2 {
   .right { right: 0; border-left: 1px solid var(--ctp-surface0); }
   .left.drawer-open, .right.drawer-open { display: grid; }
   .left.drawer-open .drawer-close, .right.drawer-open .drawer-close { display: grid; }
-  .right.drawer-open { width: min(var(--right-drawer-width, 230px), calc(100% - 48px)); }
+  .right.drawer-open { width: min(var(--right-drawer-width, 265px), calc(100% - 48px)); }
   .resize-handle, .panel-divider { display: none; }
-  main.inspector-drawer-open .inspector-resize { position: absolute; top: 0; right: min(var(--right-drawer-width, 230px), calc(100% - 48px)); bottom: 0; z-index: 7; display: block; width: 10px; }
-  main.variables-drawer-open .variables-resize { position: absolute; top: 0; left: min(var(--left-drawer-width, 190px), calc(100% - 48px)); bottom: 0; z-index: 7; display: block; width: 10px; }
+  main.inspector-drawer-open .inspector-resize { position: absolute; top: 0; right: min(var(--right-drawer-width, 265px), calc(100% - 48px)); bottom: 0; z-index: 7; display: block; width: 10px; }
+  main.variables-drawer-open .variables-resize { position: absolute; top: 0; left: min(var(--left-drawer-width, 219px), calc(100% - 48px)); bottom: 0; z-index: 7; display: block; width: 10px; }
   .panel-scrim { inset: 0; }
   .tool-panel { grid-column: 1; grid-row: 1; flex-direction: row; min-width: 0; border: 0; border-bottom: 1px solid var(--ctp-surface0); }
   .tool-list { flex-direction: row; align-items: center; gap: 2px; width: 100%; overflow-x: auto; overflow-y: hidden; padding: 3px 7px; }

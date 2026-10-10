@@ -1,4 +1,5 @@
 #include "core.hpp"
+#include "protocol.hpp"
 #include <iomanip>
 #include <iostream>
 int main() {
@@ -46,7 +47,8 @@ int main() {
       return 1;
     int substeps = std::max(1, (int)std::ceil(dt / .0005));
     for (int k = 0; k < substeps; ++k)
-      solver.step(bodies, links, forces, gravity, dt / substeps, draggedBody, target);
+      if (!solver.step(bodies, links, forces, gravity, dt / substeps, draggedBody, target))
+        return protocol::Status::ExcessiveSubsteps;
     for (auto &body : bodies)
       std::cout << body.position.x << ' ' << body.position.y << ' ' << body.angle << ' '
                 << body.velocity.x << ' ' << body.velocity.y << ' ' << body.angularVelocity << ' ';

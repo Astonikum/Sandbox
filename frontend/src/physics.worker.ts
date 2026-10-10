@@ -269,6 +269,8 @@ self.onmessage = async ({ data }) => {
     }
     if (data.type !== "frame" || !engine) return;
     const began = performance.now();
+    if (data.variables) scene.variables = data.variables;
+    if (data.variables || data.edits.length) { staticSteps = 0; settledSteps = 0; }
     for (const e of data.edits as { id: string; patch: Patch }[])
       edit(e.id, e.patch);
     const count = staticMode

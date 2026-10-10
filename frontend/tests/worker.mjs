@@ -156,3 +156,25 @@ for (const count of [400, 401]) {
   if (count === 401) assert.match(messages.at(-1).message, /400 связей/);
 }
 console.log('PASS Worker input limits at 200/201 bodies and 400/401 generated links');
+
+// Existing variables and graph configuration can be edited without resetting time.
+messages.length = 0;
+const liveScene = ensureVariables(structuredClone(initial));
+await self.onmessage({ data: { type: 'init', scene: liveScene, mode: 'dynamic' } });
+const liveMass = liveScene.bindings[bindingKey('2', 'mass')];
+let liveVariables = structuredClone(liveScene.variables);
+Object.assign(liveVariables.find(v => v.id === liveMass), { value: 3, mode: 'range', range: { min: 1, max: 5, step: .1 } });
+await self.onmessage({ data: { type: 'frame', elapsed: 1 / 60, drag: null, edits: [{ id: '2', patch: { mass: 3 } }], variables: liveVariables } });
+frame = messages.at(-1);
+assert.equal(frame.type, 'frame');
+assert.equal(frame.variableValues[liveVariables.findIndex(v => v.id === liveMass)], 3);
+assert.ok(Math.abs(frame.derived[23] - 3 * 9.81) < 1e-8);
+const editedTime = frame.time;
+liveVariables = structuredClone(liveVariables);
+Object.assign(liveVariables.find(v => v.id === liveMass), { mode: 'graph', graph: { source: 'time', points: [{ x: 0, y: 4 }, { x: 10, y: 4 }] } });
+await self.onmessage({ data: { type: 'frame', elapsed: 1 / 60, drag: null, edits: [], variables: liveVariables } });
+frame = messages.at(-1);
+assert.equal(frame.type, 'frame');
+assert.ok(frame.time > editedTime);
+assert.ok(Math.abs(frame.derived[23] - 4 * 9.81) < 1e-8);
+console.log('PASS live variable values and graph configuration reach running WASM without resetting time');

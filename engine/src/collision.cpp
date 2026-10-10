@@ -9,12 +9,22 @@ struct ContactImpulses {
   double tangent;
   bool valid;
 };
-bool findContactNormal(const Body &bodyA, const Body &bodyB, Vec2 &normal, double &depth) {
+bool findContactNormal(const Body &bodyA, const Body &bodyB, Vec2 &normal, double &depth,
+                       ContactGeometry &geometry) {
   Vec2 separation = contactCenter(bodyB) - contactCenter(bodyA);
   depth = 1e30;
   std::array<Vec2, 5> axes = {bodyA.axis(0), bodyA.axis(1), bodyB.axis(0), bodyB.axis(1)};
   int axisCount = 4;
   bool circleA = bodyA.round(), circleB = bodyB.round();
+  if (!circleA && !circleB &&
+      (geometry.angleA != bodyA.angle || geometry.angleB != bodyB.angle)) {
+    geometry.angleA = bodyA.angle;
+    geometry.angleB = bodyB.angle;
+    for (int i = 0; i < 4; ++i) {
+      geometry.axes[i] = axes[i];
+      geometry.radii[i] = projectedRadius(bodyA, axes[i]) + projectedRadius(bodyB, axes[i]);
+    }
+  }
   if (circleA && circleB) {
     axes[0] = length(separation) > 1e-10 ? normalized(separation) : Vec2{0, 1};
     axisCount = 1;
@@ -29,9 +39,11 @@ bool findContactNormal(const Body &bodyA, const Body &bodyB, Vec2 &normal, doubl
       axes[axisCount++] = normalized(corner);
   }
   for (int axisIndex = 0; axisIndex < axisCount; ++axisIndex) {
-    Vec2 axis = axes[axisIndex];
-    double overlap = projectedRadius(bodyA, axis) + projectedRadius(bodyB, axis) -
-                     std::abs(dot(separation, axis));
+    Vec2 axis = !circleA && !circleB ? geometry.axes[axisIndex] : axes[axisIndex];
+    double radius = !circleA && !circleB
+                        ? geometry.radii[axisIndex]
+                        : projectedRadius(bodyA, axis) + projectedRadius(bodyB, axis);
+    double overlap = radius - std::abs(dot(separation, axis));
     if (overlap < -0.00001)
       return false;
     if (overlap < depth) {
@@ -84,13 +96,13 @@ ContactManifold buildManifold(const Body &bodyA, const Body &bodyB, Vec2 normal)
   manifold.frictionOffsetB = center - bodyB.position;
   return manifold;
 }
-ContactImpulses solveContactImpulses(const Body &bodyA, const Body &bodyB, Vec2 normal,
-                                     const ContactManifold &manifold) {
+void prepareContactMass(const Body &bodyA, const Body &bodyB, ContactManifold &manifold) {
   double inverseMassA = bodyA.inverseMass(), inverseMassB = bodyB.inverseMass();
-  double normalImpulses[2]{};
+  Vec2 normal = manifold.normal;
   Vec2 tangent = perpendicular(normal);
   Vec2 frictionOffsetA = manifold.frictionOffsetA, frictionOffsetB = manifold.frictionOffsetB;
-  double normalMass[2][2]{}, coupling[2]{};
+  auto &normalMass = manifold.normalMass;
+  auto &coupling = manifold.coupling;
   for (int i = 0; i < manifold.count; ++i) {
     for (int k = 0; k < manifold.count; ++k)
       normalMass[i][k] = inverseMassA + inverseMassB +
@@ -103,13 +115,23 @@ ContactImpulses solveContactImpulses(const Body &bodyA, const Body &bodyB, Vec2 
                   cross(manifold.offsetB[i], normal) * cross(frictionOffsetB, tangent) *
                       bodyB.inverseInertia();
   }
-  double tangentMass = inverseMassA + inverseMassB +
+  manifold.tangentMass = inverseMassA + inverseMassB +
                        std::pow(cross(frictionOffsetA, tangent), 2) * bodyA.inverseInertia() +
                        std::pow(cross(frictionOffsetB, tangent), 2) * bodyB.inverseInertia();
+  manifold.friction = std::sqrt(bodyA.friction * bodyB.friction);
+}
+ContactImpulses solveContactImpulses(const Body &bodyA, const Body &bodyB, Vec2 normal,
+                                     const ContactManifold &manifold) {
+  double normalImpulses[2]{};
+  Vec2 tangent = perpendicular(normal);
+  Vec2 frictionOffsetA = manifold.frictionOffsetA, frictionOffsetB = manifold.frictionOffsetB;
+  const auto &normalMass = manifold.normalMass;
+  const auto &coupling = manifold.coupling;
+  const double tangentMass = manifold.tangentMass;
   double tangentTarget =
              -dot(pointVelocity(bodyB, frictionOffsetB) - pointVelocity(bodyA, frictionOffsetA),
                   tangent),
-         friction = std::sqrt(bodyA.friction * bodyB.friction), tangentImpulse = 0;
+         friction = manifold.friction, tangentImpulse = 0;
   double targetVelocity[2]{};
   tangentTarget += tangentMass * manifold.tangentImpulse;
   for (int i = 0; i < manifold.count; ++i) {
@@ -214,9 +236,21 @@ void applyDelta(Body &bodyA, Body &bodyB, const ContactState &contact, double no
   bodyB.torqueImpulse -= rolling;
 }
 void solveVelocity(Body &bodyA, Body &bodyB, ContactState &contact) {
+  if (contact.converged && bodyA.velocity.x == contact.solvedVelocityA.x &&
+      bodyA.velocity.y == contact.solvedVelocityA.y &&
+      bodyB.velocity.x == contact.solvedVelocityB.x &&
+      bodyB.velocity.y == contact.solvedVelocityB.y &&
+      bodyA.angularVelocity == contact.solvedAngularA &&
+      bodyB.angularVelocity == contact.solvedAngularB)
+    return;
+  contact.converged = false;
   const auto impulses = solveContactImpulses(bodyA, bodyB, contact.normal, contact);
   if (!impulses.valid)
     return;
+  const bool unchanged = impulses.normal[0] == contact.normalImpulse[0] &&
+                         impulses.normal[1] == contact.normalImpulse[1] &&
+                         impulses.tangent == contact.tangentImpulse;
+  const double previousRolling = contact.rollingImpulse;
   applyDelta(bodyA, bodyB, contact, impulses.normal[0] - contact.normalImpulse[0],
              impulses.normal[1] - contact.normalImpulse[1],
              impulses.tangent - contact.tangentImpulse, 0);
@@ -237,6 +271,11 @@ void solveVelocity(Body &bodyA, Body &bodyB, ContactState &contact) {
     applyDelta(bodyA, bodyB, contact, 0, 0, 0, rolling - contact.rollingImpulse);
     contact.rollingImpulse = rolling;
   }
+  contact.converged = unchanged && previousRolling == contact.rollingImpulse;
+  contact.solvedVelocityA = bodyA.velocity;
+  contact.solvedVelocityB = bodyB.velocity;
+  contact.solvedAngularA = bodyA.angularVelocity;
+  contact.solvedAngularB = bodyB.angularVelocity;
 }
 void recordContact(Body &bodyA, Body &bodyB, const ContactState &contact, int source) {
   for (int i = 0; i < contact.count; ++i) {
@@ -249,17 +288,20 @@ void recordContact(Body &bodyA, Body &bodyB, const ContactState &contact, int so
   recordImpulse(bodyA, tangent * (-1), contact.frictionOffsetA, ForceCategory::Friction, source);
   recordImpulse(bodyB, tangent, contact.frictionOffsetB, ForceCategory::Friction, source);
 }
-bool prepareContact(Body &bodyA, Body &bodyB, ContactState &contact, double dt) {
-  if (bodyA.inverseMass() == 0 && bodyB.inverseMass() == 0)
+bool prepareContact(Body &bodyA, Body &bodyB, ContactState &contact, double dt, bool correctPosition = true) {
+  if (bodyA.kind == BodyKind::Rod || bodyB.kind == BodyKind::Rod ||
+      (bodyA.inverseMass() == 0 && bodyB.inverseMass() == 0))
     return false;
   Vec2 normal;
   double depth;
-  if (!findContactNormal(bodyA, bodyB, normal, depth))
+  if (!findContactNormal(bodyA, bodyB, normal, depth, contact.geometry))
     return false;
   double inverseMassA = bodyA.inverseMass(), inverseMassB = bodyB.inverseMass();
   Vec2 correction = normal * (std::max(0., depth - .00001) * .6 / (inverseMassA + inverseMassB));
-  bodyA.position = bodyA.position - correction * inverseMassA;
-  bodyB.position = bodyB.position + correction * inverseMassB;
+  if (correctPosition) {
+    bodyA.position = bodyA.position - correction * inverseMassA;
+    bodyB.position = bodyB.position + correction * inverseMassB;
+  }
   if (!contact.active) {
     auto next = buildManifold(bodyA, bodyB, normal);
     if (!next.count)
@@ -282,6 +324,8 @@ bool prepareContact(Body &bodyA, Body &bodyB, ContactState &contact, double dt) 
     next.active = true;
     next.bodyA = contact.bodyA;
     next.bodyB = contact.bodyB;
+    next.geometry = contact.geometry;
+    prepareContactMass(bodyA, bodyB, next);
     contact = next;
     applyDelta(bodyA, bodyB, contact, contact.normalImpulse[0], contact.normalImpulse[1],
                contact.tangentImpulse, contact.rollingImpulse);
@@ -291,40 +335,67 @@ bool prepareContact(Body &bodyA, Body &bodyB, ContactState &contact, double dt) 
   return true;
 }
 }
+void ContactSolver::clear() {
+  contacts.clear();
+  std::fill(lookup.begin(), lookup.end(), nullptr);
+}
+ContactState &ContactSolver::getContact(size_t first, size_t second, int source, size_t bodyCount) {
+  lookup.resize(bodyCount * bodyCount, nullptr);
+  auto &cached = lookup[first * bodyCount + second];
+  if (!cached)
+    cached = &contacts[source];
+  cached->bodyA = first;
+  cached->bodyB = second;
+  return *cached;
+}
 void ContactSolver::beginStep(double duration) {
   dt = duration;
-  for (auto &[source, contact] : contacts)
+  for (auto &[source, contact] : contacts) {
     contact.active = false;
+    contact.converged = false;
+    contact.geometry.angleA = std::numeric_limits<double>::quiet_NaN();
+  }
 }
 void ContactSolver::warmStart(std::vector<Body> &bodies) {
   for (auto &[source, contact] : contacts) {
     if (contact.bodyA >= bodies.size() || contact.bodyB >= bodies.size())
       continue;
-    prepareContact(bodies[contact.bodyA], bodies[contact.bodyB], contact, dt);
+    prepareContact(bodies[contact.bodyA], bodies[contact.bodyB], contact, dt, false);
   }
   for (auto &[source, contact] : contacts)
     if (contact.active)
       solveVelocity(bodies[contact.bodyA], bodies[contact.bodyB], contact);
 }
-void ContactSolver::prepare(std::vector<Body> &bodies, size_t first, size_t second, int source) {
-  auto &contact = contacts[source];
-  contact.bodyA = first;
-  contact.bodyB = second;
-  prepareContact(bodies[first], bodies[second], contact, dt);
+bool ContactSolver::prepare(std::vector<Body> &bodies, size_t first, size_t second, int source) {
+  auto &contact = getContact(first, second, source, bodies.size());
+  return prepareContact(bodies[first], bodies[second], contact, dt, false);
+}
+void ContactSolver::release(std::vector<Body> &bodies, int source) {
+  const auto found = contacts.find(source);
+  if (found == contacts.end())
+    return;
+  const auto &contact = found->second;
+  if (contact.active)
+    recordContact(bodies[contact.bodyA], bodies[contact.bodyB], contact, source);
+  const size_t index = static_cast<size_t>(-1 - source);
+  if (index < lookup.size())
+    lookup[index] = nullptr;
+  contacts.erase(found);
 }
 void ContactSolver::solve(std::vector<Body> &bodies, size_t first, size_t second, int source) {
-  auto &contact = contacts[source];
-  contact.bodyA = first;
-  contact.bodyB = second;
+  auto &contact = getContact(first, second, source, bodies.size());
   auto &bodyA = bodies[first];
   auto &bodyB = bodies[second];
-  if (prepareContact(bodyA, bodyB, contact, dt))
+  if (prepareContact(bodyA, bodyB, contact, dt, false))
     solveVelocity(bodyA, bodyB, contact);
 }
 void ContactSolver::finishStep(std::vector<Body> &bodies) {
   for (auto it = contacts.begin(); it != contacts.end();) {
     const auto &contact = it->second;
     if (!contact.active) {
+      const size_t index = static_cast<size_t>(-1 - it->first);
+      if (index < lookup.size())
+        lookup[index] = nullptr;
       it = contacts.erase(it);
       continue;
     }

@@ -12,7 +12,7 @@ int main() {
       std::vector<Vec2> forces(2);
       auto advance = [&](double seconds, int drag = -1) {
         for (int i = 0; i < int(seconds / dt); ++i)
-          solver.step(bodies, {}, forces, 9.81, dt, drag, {1, -1});
+          assert(solver.step(bodies, {}, forces, 9.81, dt, drag, {1, -1}));
       };
       advance(12);
       assert(length(bodies[0].velocity) == 0);
@@ -49,7 +49,7 @@ int main() {
   std::vector<Body> bodies{free};
   std::vector<Vec2> forces(1);
   for (int i = 0; i < 2000; ++i)
-    solver.step(bodies, {}, forces, 0, .001, -1, {});
+    assert(solver.step(bodies, {}, forces, 0, .001, -1, {}));
   assert(bodies[0].velocity.x == free.velocity.x &&
          bodies[0].angularVelocity == free.angularVelocity);
   assert(std::abs(bodies[0].position.x - .0002) < 1e-12);

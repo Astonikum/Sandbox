@@ -390,7 +390,7 @@ assert.equal(linksFor({ version: 2, items: ropeItems })[0].kind, 4, 'one-ended r
 looseRope.ends[1] = { id: ropeOther.id, local: { x: 0, y: 0 } };
 assert.equal(linksFor({ version: 2, items: ropeItems })[0].kind, 10, 'two-ended rope uses pulley constraint');
 labels.length = 0;
-paint(canvas, initial, { x: 0, y: 0, scale: 90 }, null, false, false);
+paint(canvas, initial, { x: 0, y: 0, scale: 90 }, null, false, false, [], null, false);
 assert.ok(labels.includes("g"), "gravity acceleration is visible before simulation");
 assert.ok(!labels.includes("s"), "surface has no canvas caption");
 assert.ok(!labels.includes("Fтяж"), "automatic gravity force hidden before simulation");
@@ -411,7 +411,7 @@ automatic.derived = Array(20).fill(0);
 automatic.derived[0] = 3;
 automatic.derived[6] = 4;
 automatic.forceSamples = [{ source: 0, category: 2, point: {x:0,y:.5}, vector: {x:4,y:0} }];
-for (const [running, enabled, expected] of [[false, false, false], [false, true, true], [true, false, true]]) {
+for (const [running, enabled, expected] of [[false, false, false], [false, true, true], [true, false, false], [true, true, true]]) {
   labels.length = 0;
   paint(canvas, { version: 2, items: [automatic] }, { x: 0, y: 0, scale: 90 }, null, false, running, [], null, enabled);
   for (const name of ["v", "a", "Fтр"]) assert.equal(labels.includes(name), expected, name);
@@ -419,10 +419,10 @@ for (const [running, enabled, expected] of [[false, false, false], [false, true,
 const manual = make("force", "manual");
 manual.scope = "selection"; manual.targets = [automatic.id]; manual.vector = { x: 2, y: 0 };
 labels.length = 0;
-paint(canvas, { version: 2, items: [automatic, manual] }, { x: 0, y: 0, scale: 90 }, null, false, false);
+paint(canvas, { version: 2, items: [automatic, manual] }, { x: 0, y: 0, scale: 90 }, null, false, false, [], null, false);
 assert.ok(labels.includes("F"));
 assert.ok(!labels.includes("Fтр"));
-console.log("PASS manual vectors remain visible; derived vectors require simulation or explicit toggle");
+console.log("PASS manual vectors remain visible; derived vectors require the toggle in both editor and simulation");
 
 const repeated = make('rect', 'repeated');
 repeated.derived = Array(20).fill(0);
@@ -475,7 +475,7 @@ const fieldScene = structuredClone(initial);
 fieldScene.items.push(make('rect', 'extra', 2, 0));
 const gravityOrigin = () => {
   origins.length = 0;
-  paint(positionsCanvas, fieldScene, {x:0,y:0,scale:90}, null, false, false);
+  paint(positionsCanvas, fieldScene, {x:0,y:0,scale:90}, null, false, false, [], null, false);
   // The surface supplies one segment before g; each arrow has a shaft and head.
   return origins.at(-2);
 };
@@ -622,3 +622,48 @@ for (const [scope, targetIds, count, shared] of [
   else assert.ok(Math.abs(after.y-before.y-.1)<1e-10,'single-body acceleration follows its body');
 }
 console.log('PASS global, group, unassigned and single-body acceleration placement');
+
+for (const running of [false, true]) {
+  labels.length = 0;
+  const force = { ...make('force', 'manual'), scope: 'all', vector: { x: 2, y: 0 } };
+  paint(canvas, { version: 2, items: [moving, force] }, { x: 0, y: 0, scale: 80 }, null, false, running, [], null, false);
+  assert.ok(labels.includes('F'), 'manual force remains visible');
+  assert.ok(!labels.includes('Fтяж') && !labels.includes('v'), 'automatic vectors respect the toggle during playback');
+}
+const colorStrokes = [], vectorWidths = [];
+let strokeColor;
+const colorContext = new Proxy({}, {
+  get: (_, key) => key === 'measureText' ? () => ({ width: 10 }) : key === 'stroke' ? () => colorStrokes.push(strokeColor) : () => {},
+  set: (_, key, value) => { if (key === 'strokeStyle') strokeColor = value; if (key === 'lineWidth') vectorWidths.push(value); return true; },
+});
+const colorCanvas = { ...canvas, getContext: () => colorContext };
+const { vectorPalette } = await import(url(readFileSync(new URL('../src/render.ts', import.meta.url), 'utf8').replace(/from ['"]\.\/model['"]/g, `from '${modelUrl}'`)));
+const coloredBodies = Array.from({ length: 6 }, (_, i) => ({ ...make('rect', `color${i}`, i - 3, 0), vx: 1 }));
+const colorScene = { version: 2, items: coloredBodies };
+paint(colorCanvas, colorScene, { x: 0, y: 0, scale: 40 }, null, false, true, [], null, true);
+const assigned = colorStrokes.filter(c => vectorPalette.includes(c));
+assert.equal(new Set(assigned).size, 6, 'body colors do not repeat before the palette is exhausted');
+colorStrokes.length = 0;
+paint(colorCanvas, structuredClone(colorScene), { x: 0, y: 0, scale: 40 }, null, false, true, [], null, true);
+assert.deepEqual(colorStrokes.filter(c => vectorPalette.includes(c)), assigned, 'colors survive simulation frame clones');
+assert.ok(vectorWidths.includes(2.1 / 40), 'colored vectors are slightly thicker');
+colorStrokes.length = 0;
+vectorWidths.length = 0;
+paint(colorCanvas, colorScene, { x: 0, y: 0, scale: 40 }, null, false, true, [], null, true, false);
+assert.ok(!vectorWidths.includes(2.1 / 40), 'monochrome vectors retain normal thickness');
+assert.ok(!colorStrokes.some(c => vectorPalette.includes(c)), 'disabled colors use the common vector color');
+colorStrokes.length = 0;
+paint(colorCanvas, colorScene, { x: 0, y: 0, scale: 40 }, null, false, true, [], null, true, true);
+assert.deepEqual(colorStrokes.filter(c => vectorPalette.includes(c)), assigned, 'toggling colors preserves body assignments');
+const springBody = make('rect', 'spring-body', 2, 0);
+const guidedSpring = make('spring', 'guided', 1, 0);
+guidedSpring.ends[1] = { id: springBody.id, local: { x: 0, y: 0 } };
+let springScene = { version: 2, items: [springBody, guidedSpring] };
+assert.equal(linksFor(springScene).filter(l => l.kind === 13).length, 2);
+const springPin = make('bearing', 'spring-pin', 2, 0);
+springPin.fixed = false;
+springPin.bindings = [{ id: springBody.id, local: { x: 0, y: 0 } }];
+guidedSpring.ends[1] = { id: springPin.id, local: { x: 0, y: 0 } };
+springScene.items.push(springPin);
+assert.equal(linksFor(springScene).filter(l => l.kind === 13).length, 1, 'bearing releases its spring end');
+console.log('PASS vector visibility, stable distinct body colors and spring bearing guides');

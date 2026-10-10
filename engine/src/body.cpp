@@ -42,3 +42,10 @@ Vec2 pointVelocity(const Body &body, Vec2 offset) {
   return (body.fixed && !body.kinematic ? Vec2{} : body.velocity) +
          perpendicular(offset) * body.angularVelocity;
 }
+Vec2 springImpulse(const Body &a, const Body *b, const Link &link, Vec2 offsetA, Vec2 offsetB, double dt) {
+  const Vec2 separation = (b ? b->position + offsetB : link.anchor) - (a.position + offsetA),
+             direction = normalized(separation);
+  const double relative = dot((b ? pointVelocity(*b, offsetB) : Vec2{}) -
+                                  pointVelocity(a, offsetA), direction);
+  return direction * ((link.stiffness * (length(separation) - link.length) + link.damping * relative) * dt);
+}

@@ -41,7 +41,7 @@ int main() {
     std::vector<Vec2> forces(2);
     const double momentum = -1, initialEnergy = 1.5;
     for (int i = 0; i < 1000; ++i)
-      solver.step(bs, {}, forces, 0, .001, -1, {});
+      assert(solver.step(bs, {}, forces, 0, .001, -1, {}));
     assert(std::abs(bs[0].velocity.x + 2 * bs[1].velocity.x - momentum) < 1e-10);
     assert(std::abs(bs[1].velocity.x - bs[0].velocity.x - 2 * restitution) < 1e-9);
     const double lostEnergy = .5 * (2. / 3.) * (1 - restitution * restitution) * 4;
@@ -57,7 +57,7 @@ int main() {
     const double initialEnergy = 1.25;
     double drift = 0;
     for (int i = 0; i < int(4 / dt); ++i) {
-      solver.step(bs, {spring}, forces, 0, dt, -1, {});
+      assert(solver.step(bs, {spring}, forces, 0, dt, -1, {}));
       const double stretch = length(bs[1].position - bs[0].position) - spring.length;
       const double energy =
           kinetic(bs[0]) + kinetic(bs[1]) + .5 * spring.stiffness * stretch * stretch;
@@ -80,7 +80,7 @@ int main() {
     const Vec2 n = normalized(bs[1].position - bs[0].position);
     const double relative = dot(bs[1].velocity - bs[0].velocity, n);
     dissipated += damped.damping * relative * relative * dt;
-    solver.step(bs, {damped}, forces, 0, dt, -1, {});
+    assert(solver.step(bs, {damped}, forces, 0, dt, -1, {}));
   }
   const double stretch = length(bs[1].position - bs[0].position) - damped.length;
   const double energy = kinetic(bs[0]) + kinetic(bs[1]) + .5 * damped.stiffness * stretch * stretch;

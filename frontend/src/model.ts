@@ -635,7 +635,8 @@ export function validate(value: unknown): Scene {
         throw Error('Некорректный диапазон');
       if (v.mode === 'range' && !v.range) throw Error('Для режима диапазона нужны границы');
       if (v.graph && (typeof v.graph.source !== 'string' || !Array.isArray(v.graph.points) || v.graph.points.length < 2 || v.graph.points.length > 500 ||
-          v.graph.points.some((p, i) => !num(p.x) || !num(p.y) || (p.inY !== undefined && !num(p.inY)) || (p.outY !== undefined && !num(p.outY)) || (i > 0 && p.x <= v.graph!.points[i-1].x))))
+          v.graph.points.some(p => !num(p.x) || !num(p.y) || (p.inY !== undefined && !num(p.inY)) || (p.outY !== undefined && !num(p.outY))) ||
+          new Set(v.graph.points.map(p => p.x)).size !== v.graph.points.length))
         throw Error('Некорректный график');
       if (v.mode === 'graph' && !v.graph) throw Error('Для режима графика нужна кривая');
     }

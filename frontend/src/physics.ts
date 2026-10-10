@@ -1,4 +1,4 @@
-import { body, connector, geo, resolve, endpoint, local } from "./model";
+import { body, connector, geo, resolve, endpoint, local, center } from "./model";
 import type { Scene, Vec, BodyItem, Geometry } from "./model";
 export type Link = {
   id: string;
@@ -73,6 +73,24 @@ export function linksFor(s: Scene): Link[] {
         o.damping,
         pulley,
       );
+      if (o.kind === "spring") for (const end of [0, 1] as const) {
+        const own = end === 0 ? a : b, other = end === 0 ? b : a;
+        const anchor = o.ends[end];
+        const pin = anchor && s.items.find(item => item.id === anchor.id);
+        const hinged = pin?.kind === "bearing" || s.items.some(item => item.kind === "bearing" &&
+          item.bindings.some(binding => resolve(binding, s.items).body?.id === own.body?.id) &&
+          Math.hypot(center(item, s.items).x - own.p.x, center(item, s.items).y - own.p.y) <= item.w / 2 + .001);
+        if (hinged || (!own.body && anchor)) continue;
+        // A free end is a world anchor, as in the spring force itself.
+        if (!own.body && !other.body) continue;
+        const guide = own.body ? own : other, opposite = own.body ? other : own;
+        add(o.id, 13, guide, opposite);
+        const link = links.at(-1);
+        if (link?.kind === 13 && link.id === o.id) {
+          link.pulley = own.body ? 0 : -1;
+          link.angle = Math.atan2(opposite.p.y - guide.p.y, opposite.p.x - guide.p.x) - (own.body?.angle || 0);
+        }
+      }
     } else if (o.kind === "rod")
       for (const e of [0, 1] as const) {
         const anchor = o.ends[e];

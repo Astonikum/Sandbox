@@ -5,6 +5,15 @@ export type VariableMode = 'number' | 'range' | 'graph';
 export type Variable = { id: string; symbol: string; value: number; unit: string; displayUnit?: string; visible: boolean; mode?: VariableMode; auto?: boolean; visibilityLocked?: boolean; derived?: { itemId: string; index: number }; range?: { min: number; max: number; step: number }; graph?: { source: string; points: Point[] } };
 export type VariableScene = Scene & { variables?: Variable[]; bindings?: Record<string, string> };
 export type Field = { key: string; label: string; unit: string; letter: string; min?: number; max?: number; computed?: boolean };
+const sortedGraphPoints = new WeakMap<Point[], Point[]>();
+function graphPointsByX(points: Point[]) {
+  let sorted = sortedGraphPoints.get(points);
+  if (!sorted) {
+    sorted = [...points].sort((a, b) => a.x - b.x);
+    sortedGraphPoints.set(points, sorted);
+  }
+  return sorted;
+}
 export function variableMode(variable: Variable): VariableMode {
   return variable.mode ?? (variable.graph ? 'graph' : variable.range ? 'range' : 'number');
 }
@@ -327,9 +336,10 @@ export function removeVariable(scene: VariableScene, id: string): VariableScene 
 }
 export function valueAt(points: Point[], x: number): number {
   if (!points.length) return 0;
-  if (x <= points[0].x) return points[0].y;
-  for (let i = 1; i < points.length; i++) {
-    const a = points[i - 1], b = points[i];
+  const ordered = graphPointsByX(points);
+  if (x <= ordered[0].x) return ordered[0].y;
+  for (let i = 1; i < ordered.length; i++) {
+    const a = ordered[i - 1], b = ordered[i];
     if (x > b.x) continue;
     if (b.break) return x < b.x ? a.y : b.y;
     const t = (x - a.x) / (b.x - a.x), u = 1 - t,
@@ -337,5 +347,12 @@ export function valueAt(points: Point[], x: number): number {
       inY = b.inY ?? a.y + (b.y - a.y) * 2 / 3;
     return u*u*u*a.y + 3*u*u*t*outY + 3*u*t*t*inY + t*t*t*b.y;
   }
-  return points.at(-1)!.y;
+  return ordered.at(-1)!.y;
+}
+
+export function restoreSimulation(snapshot: VariableScene, live: VariableScene): VariableScene {
+  return { ...snapshot, variables: snapshot.variables?.map(v => {
+    const edited = live.variables?.find(next => next.id === v.id);
+    return edited ? { ...edited, value: v.value } : v;
+  }) };
 }
